@@ -110,7 +110,7 @@ class MDN(object):
 				 seed=None, verbose=False, debug=False, **kwargs):
 
 		self.n_mix        = n_mix
-		self.hidden	      = list(np.atleast_1d(hidden))
+		self.hidden       = list(np.atleast_1d(hidden))
 		self.lr           = lr
 		self.l2           = l2
 		self.n_iter       = n_iter
