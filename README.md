@@ -22,7 +22,7 @@ sensor = "<S2A, S2B, or OLCI>"
 # Tile should be the output of an atmospheric correction program e.g. SeaDAS
 bands, Rrs = get_tile_Rrs("path/to/my/tile.nc", sensor, allow_neg=False) 
 
-estimates = get_image_estimates(*Rrs, sensor=sensor)
+estimates = image_estimates(*Rrs, sensor=sensor)
 chlor_a = estimates[0]
 ```
 
