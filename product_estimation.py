@@ -5,7 +5,6 @@ import sys
 import warnings
 import hashlib
 
-# from tensorflow.python.client import timeline 
 from collections import defaultdict as dd
 from pathlib import Path
 from sklearn import preprocessing
@@ -14,7 +13,7 @@ from tqdm  import trange, tqdm
 
 from .mdn   import MDN
 from .meta  import get_sensor_bands, get_sensor_label, SENSOR_LABEL
-from .utils import add_identity, get_labels, get_data, find_wavelength, generate_config, bagging_subset, store_scaler
+from .utils import add_identity, get_labels, get_data, find_wavelength, generate_config, bagging_subset, store_scaler, add_stats_box
 from .metrics import performance, rmse, rmsle, leqznan, mape, r_squared, slope, nrmse, malar, mwr, bias, mae
 from .benchmarks import print_benchmarks
 from .parameters import get_args
@@ -303,8 +302,6 @@ def main():
 		product   = args.product.split(',') if args.product != 'all' else ['chl']
 		estimates = []
 
-		rtrial_ests = []
-		rtrial_true = []
 		for _ in range(1):
 
 			if not args.use_sim:
@@ -324,21 +321,8 @@ def main():
 				y_train = y_data
 				x_valid = np.zeros((0,x_data.shape[1]))
 				y_valid = np.zeros((0,y_data.shape[1]))
-			waves   = get_sensor_bands(args.sensor, args)
+			waves = get_sensor_bands(args.sensor, args)
 
-
-
-			# x_test = x_test[ coast_data[data_idxs[n_train+n_valid:]] ]
-			# y_test = y_test[ coast_data[data_idxs[n_train+n_valid:]] ]
-
-			# v = np.logical_and(y_test > .4, y_test < 50).flatten()
-			# y_test = y_test[v]
-			# x_test = x_test[v]
-			# from QAA import find
-			# for band in [482, ]:
-			# 	i = find(band, np.array(get_sensor_bands(args.sensor, args)))
-			# 	print(band, i)
-			# 	x_test[:,i] -= x_test[:,i] * np.abs(np.random.normal(0.5, 0.1, len(x_test)))
 
 			n_targets = y_test.shape[1]
 			print('Min/Max Test X:', list(zip(np.nanmin(x_test, 0).round(2), np.nanmax(x_test, 0).round(2))))
@@ -430,7 +414,7 @@ def main():
 			if 'aph' in product:
 				color  = ['xkcd:sky blue', 'xkcd:tangerine', 'xkcd:lightish green', 'xkcd:reddish', 'xkcd:bluish purple']
 			else:
-				color  = ['xkcd:sky blue', 'xkcd:tangerine', 'xkcd:greyish blue', 'xkcd:goldenrod', 'xkcd:fresh green', 'xkcd:clay']#, 'xkcd:bluish purple', 'xkcd:reddish']
+				color  = ['xkcd:sky blue', 'xkcd:tangerine', 'xkcd:lightish green', 'xkcd:greyish blue', 'xkcd:goldenrod', 'xkcd:fresh green', 'xkcd:clay']#, 'xkcd:bluish purple', 'xkcd:reddish']
 
 			y_log  = np.array([np.log10(y_test[:, slices[p]]) for p in product]).T 
 			# bench  = [[(k,b[i:i+y_log.shape[1]]) for k,b in bench.items() for i in range(0, len(bench), y_log.shape[1])]
@@ -609,11 +593,11 @@ def main():
 				bench_order = None
 				if n_plots > 3 or 'chl' in product:
 					bench_order = ['Smith_Blend', 'OC6', 'Mishra_NDCI', 'Gons_2band', 'Gilerson_2band']
-					bench_order = ['OC3', 'Nechad TSS']#'XGB', 'SVM', 'MLP', 'KNN']
+					bench_order = ['OC3', 'Smith_Blend']#'XGB', 'SVM', 'MLP', 'KNN']
 					bench_order = [b for b in bench_order if b in bdict]
 					n_plots = len(bench_order) + 1
 					# fig, axes = plt.subplots(2, (n_plots+1)//2, sharey=False, figsize=(5*((n_plots+1)//2),10))
-					fig, axes = plt.subplots(n_target, n_plots, sharey=False, figsize=(n_plots*5,n_target*5))
+					fig, axes = plt.subplots(n_target, n_plots, sharey=False, figsize=(n_plots*5,n_target*5+2))
 
 				else:
 					bench_order = ['QAA']#, 'GIOP']
@@ -688,13 +672,6 @@ def main():
 							y_est_orig = y_bench.copy()
 
 						else:
-							# if n_train < 100: 
-							# 	if any(['QAA' in b[1] for b in benches]):
-							# 		y_bench, label = [b for b in benches if 'QAA' in b[1]][0]
-							# 	elif any(['OC3' in b[1] for b in benches]):
-							# 		y_bench, label = [b for b in benches if 'OC3' in b[1]][0]
-							# 	y_est = np.log10(y_bench).flatten()
-							# else:
 							[i.set_linewidth(5) for i in ax.spines.values()]
 							y_model = y_model.flatten()
 							y_est = np.log10(y_model)
@@ -713,8 +690,8 @@ def main():
 							# plt.xlabel(r'$\mathbf{%s}$' % (r'In\ situ\ '+fr'{prod_lbl}\ '+unit) +'\n'+ r'$\small{\mathit{N\small{=}}%s}$'%len(y_true), fontsize=20, fontweight='bold', labelpad=10)
 							plt.xlabel(r'$\mathbf{%s}$' % (r'Measured\ '+fr'{prod_lbl}\ '+unit), fontsize=20, fontweight='bold', labelpad=10)
 							plot_title = get_sensor_label(args.sensor).replace('-',' ').replace(' ', '\ ')
-							plt.title(r'$\mathbf{\underline{\large{In\ Situ}}}$', fontsize=24, y=1.05)
-							# plt.title(r'$\mathbf{\underline{\large{%s}}}$'%plot_title + '\n' + r'$\small{\mathit{N\small{=}}%s}$'%len(y_true), fontsize=24, y=1.06)
+							# plt.title(r'$\mathbf{\underline{\large{In\ Situ}}}$', fontsize=24, y=1.05)
+							plt.title(r'$\mathbf{\underline{\large{%s}}}$'%plot_title + '\n' + r'$\small{\mathit{N\small{=}}%s}$'%len(y_true), fontsize=24, y=1.09)
 
 						if product not in ['chl', 'tss']:
 							wvl = int(get_sensor_bands(args.sensor, args)[plt_idx])
@@ -725,11 +702,9 @@ def main():
 								ax2.tick_params(labelcolor='none', top=False, bottom=False, left=False, right=False, pad=0)
 								ax2.grid(False)
 								ax2.set_ylabel(fr'$\mathbf{{{prod_lbl}}}$', fontsize=20)
-						
-
 
 						minv = -4 if product in ['aph', 'a*ph', 'bb_p'] else -2 #int(y_true.min()) - 2
-						maxv = int(round(np.nanmax(y_true)) + 1) if product != 'aph' else 1#+ (1 if product in ['aph'] else 0)
+						maxv = int(np.nanmax(y_true)) + 1 if product != 'aph' else 1#+ (1 if product in ['aph'] else 0)
 						loc  = ticker.LinearLocator(numticks=maxv-minv+1)
 
 						ax.set_ylim((minv, maxv))
@@ -738,7 +713,6 @@ def main():
 						ax.yaxis.set_major_locator(loc)
 						ax.xaxis.set_major_formatter(fmt)
 					
-						# if n_plots > 3 and i in [0, 1]:
 						if (n_targets > 1 and curr_idx <= (len(axes) - n_plots)) or (n_plots > 3 and curr_idx <= (len(axes) - 3)):
 							ax.set_xticklabels([])
 
@@ -756,358 +730,19 @@ def main():
 						if len(valid.flatten()) != valid.sum():
 							ax.scatter(y_true[~valid], [minv]*(~valid).sum(), color='r', alpha=0.4, label=r'$\mathbf{%s\ invalid}$' % (~valid).sum())
 							ax.legend(loc='lower right', fontsize=16, prop={'weight':'bold'})
-							# ax.annotate(r'$\mathbf{%s invalid}$' % (~valid).sum(), 
-							# 		xy=(0.8,0.09), xytext=(0,0), 
-							# 		xycoords='axes fraction',
-							# 		textcoords="offset points",
-							# 		size=11, va="top", 
-							# 		zorder=25, ha="left", 
-							# 		#fontname='monospace', 
-							# 		transform=ax.transAxes)
-						# if n_plots > 1: ax.legend(loc=4, fontsize=14)
+
 						add_identity(ax, ls='--', color='k', zorder=20)
+						add_stats_box(ax, y_orig, y_est_orig)
 
-						y_true_base = y_orig#[valid] #10 ** y_true[valid]
-						y_est_base  = y_est_orig#[valid] #10 ** y_est[valid]
-
-						s = [
-							r'$\mathtt{Bias}\ \thinspace:$ '+f'{bias(y_true_base, y_est_base):.3f}',
-
-							r'$\mathtt{Slope}:$ '+f'{slope(y_true_base, y_est_base):.3f}',
-							r'$\mathtt{RMSLE}:$ '+f'{rmsle(y_true_base, y_est_base):.3f}',
-							# r'$\mathtt{RMSE}\ \thinspace:$ '+f'{rmse(y_true_base, y_est_base):.3f}',
-							r'$\mathtt{MAPE}\ \thinspace:$ '+f'{mape(y_true_base, y_est_base):.1f}'+r'$\small{\mathsf{\%}}$',
-							# r'$\mathtt{R^2}\ \ \ \ \ :$ '+f'{r_squared(y_true_base, y_est_base):.3f}',
-							r'$\mathtt{MAE}\ \ \thinspace\thinspace:$ '+f'{mae(y_true_base, y_est_base):.3f}',
-						]
-
-						sensor_lbl = args.sensor.replace('S2B', 'MSI').replace('MOD', 'MODIS').replace('VI', 'VIIRS')
-						# s = [r'$\underline{\mathbf{\large{%s}}\ \ (\mathit{N\small{=}}%s)}$' % (sensor_lbl, len(y_true))] + s
-						# s = [r'$\underline{\mathbf{\large{%s}}}$' % label.split(' ')[0].replace('_2band','\ 2\ Band')] + s
 						if curr_idx <= n_plots:
-							ax.set_title(r'$\mathbf{\large{%s}}$' % label.split(' ')[0].replace('_2band','\ 2\ Band'), fontsize=20)
+							ax.set_title(r'$\mathbf{\large{%s}}$' % label.split(' ')[0].replace('_2band','\ 2\ Band'), fontsize=18)
 
-						x   = 0.025
-						y   = 0.97
-						ann = ax.annotate('\n'.join(s), 
-								xy=(x,y), xytext=(0,0), 
-								xycoords='axes fraction',
-								textcoords="offset points",
-								size=16, va="top", 
-								zorder=25, ha="left", 
-								fontname='monospace', 
-								transform=ax.transAxes)
-
-						bottom_right = False
-						if bottom_right:
-							plt.gcf().canvas.draw()
-							bbox_orig = ann.get_tightbbox(plt.gcf().canvas.renderer).transformed(ax.transAxes.inverted())
-
-							new_x = 1 - (bbox_orig.x1 - bbox_orig.x0) + x
-							new_y = bbox_orig.y1 - bbox_orig.y0 + (1 - y)
-							ann.set_x(new_x)
-							ann.set_y(new_y)
-							# ann.xy = (new_x - (0 if sensor not in ['OLI', 'ETM', 'TM'] else 0.05), new_y + (0 if sensor not in ['OLI', 'ETM', 'TM'] else 0.04))
-							ann.xy = (new_x - 0.04, new_y + 0.06)
-
-						# ann.set_fontfamily('monospace')
-						ann.set_bbox(dict(facecolor='white', alpha=.7, edgecolor='black', zorder=26))
-
-						t = title.replace('aph', r'$a_{ph}$').replace('chl', 'Chl')
-						#if n_plots == 1:
-						#	plt.title(f'{method} Derived {t}: {get_sensor_label(args.sensor)} (N={len(y_true)})')
-						#else:
-						#	plt.suptitle(f'{t}: {get_sensor_label(args.sensor)} (N={len(y_true)})')
-						ax.annotate(r'$\mathbf{1:1}$', 
-									xy=(0.87,0.99), xytext=(0,0), 
-									xycoords='axes fraction',
-									textcoords="offset points",
-									size=11, va="top", 
-									zorder=25, ha="left", 
-									#fontname='monospace', 
-									transform=ax.transAxes)
 						ax.tick_params(labelsize=18)
-
 						ax.grid('on', alpha=0.3)
 
 				plt.tight_layout()
 				plt.savefig(f'{args.product}_{args.sensor}_scatter_{n_train}train.png', dpi=200, bbox_inches='tight', pad_inches=0.1,)
 				plt.show()
-				assert(0)
-
-
-		print('\n--------------------------------------------------------')
-		
-		plt.rc('text', usetex=True)
-
-		plt.rcParams['axes.axisbelow'] = False
-		# plt.rcParams['xtick.major.pad']='7'
-		# plt.rcParams['ytick.major.pad']='-20'
-		
-		ests  = [r[0] for r in rtrial_ests]
-		bench = [r[1] for r in rtrial_ests]
-
-		bench_keys = list(bench[0].keys())
-		bench_keys+= ['MDN']
-
-		for i,e in enumerate(ests):
-			bench[i]['MDN'] = e
-
-		def omrs(*args, **kwargs):
-			return 1-r_squared(*args, **kwargs)
-		omrs.__name__ = r'$1-R^{2}$'
-
-		metrics = [rmsle, nrmse, mape, malar, omrs] + [rmse, mape, slope, bias, mae, mwr]
-		m_names = [m.__name__ for m in metrics]
-		b_stats = {}
-
-		for k in bench[0].keys():
-			if k == 'OC4' and args.sensor != 'OLCI': continue
-			stats = dd(list)
-			for name, f in zip(m_names, metrics):
-				for y,b in zip(rtrial_true, bench):
-					if name == 'MWR':
-						stats[name].append(f(y, b['MDN'], b[k]))
-					else:
-						stats[name].append(f(y, b[k]))
-			print('%8s | %s' % (k, '   '.join([
-					'%s: %6.3f' % (name, np.mean(stats[name])) for name in m_names
-				])))
-			b_stats[k] = stats
-
-		theta = radar_factory(len(metrics), frame='polygon')
-
-		fig, ax = plt.subplots(subplot_kw={'projection':'radar'})
-		# fig.subplots_adjust(top=0.85, bottom=0.05)
-		# print(dir(ax))
-		# ax.set_thetagrids(np.linspace(0, 360, len(metrics)), frac=1.3)
-		plt.rcParams['axes.unicode_minus'] = False
-
-		# ax.set_rgrids([0.2, 0.4, 0.6, 0.8])
-		# 
-		ax.set_title(r'$\mathbf{\underline{%s}}$'%get_sensor_label(args.sensor), ha='center', fontsize=18, fontweight='bold', y=1.08)
-
-		for k in b_stats:
-			mean = [np.mean(b_stats[k][m]) for m in m_names]
-			std  = [np.std(b_stats[k][m]) for m in m_names]
-			line = ax.plot(theta, mean, label=k, lw=2)
-			ax.fill_between(theta, [m+s for m,s in zip(mean,std)], [m-s for m,s in zip(mean,std)],  alpha=0.25)
-		ax.set_varlabels(m_names)
-
-		# loc  = ticker.LinearLocator(numticks=5)
-		ax.yaxis.get_major_locator().base.set_params(nbins=5)
-		ax.yaxis.set_tick_params(pad=-10)
-		ax.xaxis.set_tick_params(pad=2)
-		# for i, t in enumerate(ax.get_xticklabels()):
-		# 	if t.get_text() == m_names[1]:
-		# 		t.set_rotation(45)
-		# 	elif t.get_text() == m_names[-1]:
-		# 		t.set_rotation(-45)
-		# 	else:
-		# 		print(t.get_text())
-		ax.set_rlabel_position(45)
-		plt.gcf().canvas.draw()
-		for label in ax.get_xticklabels():
-			x,y = label.get_position()
-			lab = ax.text(x,y, label.get_text(), transform=label.get_transform(),
-						  ha=label.get_ha(), va=label.get_va())
-			if label.get_text() == m_names[1]:
-				lab.set_rotation(45)
-			if label.get_text() == m_names[-1]:
-				lab.set_rotation(-45)
-			lab.set_fontweight('bold')
-			lab.set_fontsize(12)
-		ax.set_xticklabels([])
-
-		for label in ax.get_yticklabels()[:-1]:
-			x,y = label.get_position()
-			lab = ax.text(x*1.2,y*.85, r'$\mathbf{%s}$'%label.get_text().replace('$',''), transform=label.get_transform(),
-						  ha=label.get_ha(), va=label.get_va())
-			lab.set_fontsize(12)
-			lab.set_fontweight('bold')
-			lab.set_bbox(dict(facecolor='white', edgecolor='None', alpha=0.6 ))
-
-		ax.set_yticklabels([])
-
-		# ax.set_rticks(np.linspace(ax.get))
-		# ax.xaxis.set_major_locator(loc)
-		# ax.yaxis.set_major_locator(loc)
-		plt.legend(loc='lower left', bbox_to_anchor=(-.25, -0.22), ncol=int(len(b_stats)/2+.6), fontsize=11)
-		plt.subplots_adjust(bottom=.2, top=.8)
-		plt.savefig(f'{args.sensor}_radar_{n_train}train.png', dpi=300, bbox_inches='tight', pad_inches=0.1,)
-		plt.show()
-
-
-
-		estimates = np.dstack(ests).flatten()
-		benches = dd(list)
-		for b in bench:
-			for k in b:
-				if k != 'MDN':
-					benches[k].append(b[k])
-		for k in benches:
-			benches[k] = np.dstack(benches[k]).flatten()
-		benches = [(v, k) for k,v in benches.items()]
-
-		y_true = np.dstack(rtrial_true).flatten()
-		print(benches[0][0].shape, estimates.shape, y_true.shape)
-		y_log = np.log10(y_true)
-
-		plt.rc('text', usetex=True)
-		plt.rcParams['mathtext.default']='regular'
-
-		#fmt  = ticker.FormatStrFormatter(r'$10^{%i}$')
-		fmt  = ticker.FuncFormatter(lambda i, _: r'$10$\textsuperscript{%i}'%i)
-
-		seaplts = []
-		n_plots = 3
-		n_plots = min(n_plots, 1+len(bench))
-
-		valid_plot = [True] * len(labels)
-		if len(labels) > 10:
-			target     = [443, 590, 620, 670] if product == 'a*ph' else [444,581,667]
-			waves      = np.array(get_sensor_bands(args.sensor, args))
-			valid_wvls = [waves[find_wavelength(w, waves)] for w in target]
-			valid_plot = [w in valid_wvls for w in waves]
-		print('Plotting labels:', [l for i,l in enumerate(labels) if valid_plot[i]])
-
-		if not len(bench):
-			bench = [[None] * y_log.shape[1]]
-		
-		# fig, axes = plt.subplots(2, 2, sharey=False, figsize=(8,7))
-		fig, axes = plt.subplots(1, 3, sharey=False, figsize=(15,5))
-		fig.add_subplot(111, frameon=False)
-		plt.tick_params(labelcolor='none', top=False, bottom=False, left=False, right=False, pad=10)
-		# axes[0][1].axis('off')
-		y_log = y_log[:,None]
-		estimates = estimates[:,None]
-		bench = benches
-		for plt_idx, (title, y_true, y_model, benches) in enumerate(zip(labels, y_log.T, estimates.T, [bench])):
-			if not valid_plot[plt_idx]:
-				continue 
-			# fig = plt.figure(figsize=(2*4,7))
-
-			method_lbls = []
-			for i in range(n_plots):
-				# ax = plt.subplot2grid((1, n_plots), (0, i))
-				# ax = plt.subplot2grid((2, 2), (0 if i == 0 else 1, i if i == 0 else i-1))
-				# ax = axes[0 if i == 0 else 1][i if i == 0 else i-1]
-				ax = axes[i]
-				s_kws = {'alpha': 0.1, 'color': color[i]}
-				l_kws = {'color': color[i], 'path_effects': [pe.Stroke(linewidth=4, foreground='k'), pe.Normal()], 'zorder': 22, 'lw': 1}
-
-				if i:
-					if i == 1 and any(['OC3' in b[1] for b in benches]):
-						y_bench, label = [b for b in benches if 'OC3' in b[1]][0]
-					elif i == 2 and any(['Blend' in b[1] for b in benches]):
-						y_bench, label = [b for b in benches if 'Blend' in b[1]][0]
-					else:
-						y_bench, label = benches[i-1]
-					y_est = np.log10(y_bench).flatten()
-					
-				else:
-					if n_train < 100: 
-						if any(['QAA' in b[1] for b in benches]):
-							y_bench, label = [b for b in benches if 'QAA' in b[1]][0]
-						elif any(['OC3' in b[1] for b in benches]):
-							y_bench, label = [b for b in benches if 'OC3' in b[1]][0]
-						y_est = np.log10(y_bench).flatten()
-					else:
-						y_est = np.log10(y_model)
-						label = method
-	
-				method_lbls.append(label.split(' ')[0])
-				prod_lbl = product.replace('chl', 'Chla').replace('ph', '_{ph}').replace('apg','a_{pg}').replace('ap','a_{p}')
-				prod_lbl = prod_lbl.replace('ad', 'a_{d}').replace('ag', 'a_{cdom}').replace('*', '^{*}').replace('tss', 'SPM')
-				if product not in ['chl', 'tss']:
-					wvl = int(get_sensor_bands(args.sensor, args)[plt_idx])
-					prod_lbl += f'(\small{{{wvl}nm}})'
-
-				unit = r'[mg/m^{3}]' if product=='chl' else r'[g/m^{3}]' if product == 'tss' else r'[1/m]'
-				# if i == 0:
-				# 	ax.set_xticklabels([])
-				if i:
-					ax.set_yticklabels([])
-				else:
-					ax.yaxis.set_major_formatter(fmt)
-				if i == 1: 
-					plt.ylabel(fr'$\mathbf{{Modeled\ {prod_lbl}\ '+unit + r'}$', fontsize=20, fontweight='bold')
-
-				if i == 1:
-					plt.xlabel(r'$\mathbf{%s}$' % (r'In\ situ\ '+fr'{prod_lbl}\ '+unit), fontsize=20, fontweight='bold')
-				
-				minv = int(y_true.min()) - (1 if product in ['chl', 'apg', 'aph', 'a*ph', 'ag', 'tss', 'ad'] else 0)
-				maxv = round(y_true.max()) #+ (1 if product in ['aph'] else 0)
-				loc  = ticker.LinearLocator(numticks=maxv-minv+1)
-
-				ax.set_ylim((minv, maxv))
-				ax.set_xlim((minv, maxv))
-				ax.xaxis.set_major_locator(loc)
-				ax.yaxis.set_major_locator(loc)
-				ax.xaxis.set_major_formatter(fmt)
-
-				valid = np.logical_and(np.isfinite(y_true), np.isfinite(y_est))
-
-				sns.regplot(y_true[valid], y_est[valid], label=r'$\mathrm{%s}$'%label.split(' ')[0], ax=ax, scatter_kws=s_kws, line_kws=l_kws)
-				kde = sns.kdeplot(y_true[valid], y_est[valid], shade=False, ax=ax, bw='scott', n_levels=4, legend=False, gridsize=100, color=color[int(not i)])
-				kde.collections[2].set_alpha(0)
-
-				if len(valid) != valid.sum():
-					ax.scatter(y_true[~valid], [int(y_true.min())-1]*(~valid).sum(), color='r', alpha=0.4, label=r'$\mathrm{\leq 0}$')
-
-				# if n_plots > 1: ax.legend(loc=4, fontsize=14)
-				add_identity(ax, ls='--', color='k', zorder=20)
-
-				y_true_base = 10 ** y_true[valid]
-				y_est_base  = 10 ** y_est[valid]
-				s = [
-					r'$\mathtt{Slope}:$ '+f'{slope(y_true_base, y_est_base):.3f}',
-					r'$\mathtt{RMSE}\ \thinspace:$ '+f'{rmse(y_true_base, y_est_base):.3f}',
-					r'$\mathtt{MAPE}\ \thinspace:$ '+f'{mape(y_true_base, y_est_base)*100:.1f}'+r'$\small{\mathsf{\%}}$',
-					r'$\mathtt{R^2}\ \ \ \ \ :$ '+f'{r_squared(y_true_base, y_est_base):.3f}',
-				]
-
-				sensor_lbl = args.sensor.replace('S2B', 'MSI').replace('MOD', 'MODIS').replace('VI', 'VIIRS')
-				# s = [r'$\underline{\mathbf{\large{%s}}\ \ (\mathit{N\small{=}}%s)}$' % (sensor_lbl, len(y_true))] + s
-				s = [r'$\underline{\mathbf{\large{%s}}}$' % label.split(' ')[0]] + s
-				if i == 0:
-					plt.title(r'$\mathbf{\large{%s}}\ \ (\mathit{N\small{=}}%s)$' % (sensor_lbl, len(y_true)//len(rtrial_true)), fontsize=20)
-
-
-				ann = ax.annotate('\n'.join(s), 
-						xy=(0.025,0.97), xytext=(0,0), 
-						xycoords='axes fraction',
-						textcoords="offset points",
-						size=16, va="top", 
-						zorder=25, ha="left", 
-						fontname='monospace', 
-						transform=ax.transAxes)
-
-				# ann.set_fontfamily('monospace')
-				ann.set_bbox(dict(facecolor='white', alpha=.7, edgecolor='black', zorder=26))
-
-				t = title.replace('aph', r'$a_{ph}$').replace('chl', 'Chl')
-				#if n_plots == 1:
-				#	plt.title(f'{method} Derived {t}: {get_sensor_label(args.sensor)} (N={len(y_true)})')
-				#else:
-				#	plt.suptitle(f'{t}: {get_sensor_label(args.sensor)} (N={len(y_true)})')
-				ax.annotate(r'$\mathbf{1:1}$', 
-							xy=(0.87,0.99), xytext=(0,0), 
-							xycoords='axes fraction',
-							textcoords="offset points",
-							size=11, va="top", 
-							zorder=25, ha="left", 
-							#fontname='monospace', 
-							transform=ax.transAxes)
-				ax.tick_params(labelsize=18)
-
-				ax.grid('on', alpha=0.3)
-			plt.tight_layout()
-			if n_train > 1:
-				plt.savefig(f'{title}_{args.sensor}_scatter_{n_train}train.png', dpi=300, bbox_inches='tight', pad_inches=0.1,)
-			else:
-				plt.savefig(f'{title}_{args.sensor}_scatter_{"_".join(method_lbls)}.png', dpi=300, bbox_inches='tight', pad_inches=0.1,)
-			plt.show()
 
 	# Otherwise, train a model with all data (if not already existing)
 	else:
