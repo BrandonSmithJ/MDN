@@ -1,5 +1,3 @@
-# from .GIOP.giop    import GIOP
-from .QAA          import QAA
 from .metrics      import performance
 from .utils        import find_wavelength
 from .meta         import get_sensor_bands
@@ -203,6 +201,7 @@ def bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices={'chl':slice
 
 
 def bench_qaa(args, sensor, x_test, y_test, slices, silent=False):
+	from .QAA import QAA
 	waves = np.array(get_sensor_bands(sensor, args))
 	param = [k for k in slices if k[0]=='a' or k[0]=='b']
 	qaa   = QAA(x_test, waves[:x_test.shape[1]])
@@ -227,6 +226,7 @@ def bench_qaa(args, sensor, x_test, y_test, slices, silent=False):
 
 
 def bench_giop(args, sensor, x_test, y_test, slices, silent=False):
+	from .GIOP.giop import GIOP
 	waves = np.array(get_sensor_bands(sensor, args))
 	param = [k for k in slices if k[0]=='a' or k[0]=='b' or k[0]=='c']
 	gest  = GIOP(x_test, waves[:x_test.shape[1]], sensor)
@@ -284,7 +284,7 @@ def run_benchmarks(args, sensor, x_test, y_test, slices, silent=True, x_train=No
 
 	if 'chl' in slices:
 		benchmarks.update( bench_chl(args, sensor, x_test, y_test, slices, silent) )
-		# benchmarks.update( bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices, silent, gridsearch=gridsearch) )
+		benchmarks.update( bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices, silent, gridsearch=gridsearch) )
 		# benchmarks.update( bench_giop(sensor, x_test, y_test, slices, silent) )
 
 	if 'tss' in slices:
