@@ -19,4 +19,4 @@ gsm
 QAA.py
 
 # pdf files
-**/*.pdf
+*.pdf
