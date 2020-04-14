@@ -1,0 +1,22 @@
+# compiled files
+**/__pycache__
+__pycache__
+*.py[cod]
+
+# Cached data
+Cache
+
+# Development files
+Development
+Model_dev
+plot_multiprod.py
+map_files
+
+# Other benchmarks (temporary, until added to benchmark folder)
+GIOP
+IOP
+gsm
+QAA.py
+
+# pdf files
+**/*.pdf
