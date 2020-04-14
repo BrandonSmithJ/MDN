@@ -408,13 +408,13 @@ def main():
 			# 	assert(0)
 
 			n_wvl  = len(get_sensor_bands(args.sensor, args))
-			bench  = run_benchmarks(args, args.sensor, x_test[:,:n_wvl], y_test, {p:slices[p] for p in product}, silent=False, x_train=x_train, y_train=y_train, gridsearch=False)
+			bench  = run_benchmarks(args, args.sensor, x_test[:,:n_wvl], y_test, {p:slices[p] for p in product}, silent=False, x_train=x_train, y_train=y_train, gridsearch=True)
 			bdict  = bench
 			labels = get_labels(get_sensor_bands(args.sensor, args), slices, y_test.shape[1])
 			if 'aph' in product:
 				color  = ['xkcd:sky blue', 'xkcd:tangerine', 'xkcd:lightish green', 'xkcd:reddish', 'xkcd:bluish purple']
 			else:
-				color  = ['xkcd:sky blue', 'xkcd:tangerine', 'xkcd:lightish green', 'xkcd:greyish blue', 'xkcd:goldenrod', 'xkcd:fresh green', 'xkcd:clay']#, 'xkcd:bluish purple', 'xkcd:reddish']
+				color  = ['xkcd:sky blue', 'xkcd:tangerine', 'xkcd:greyish blue', 'xkcd:goldenrod', 'xkcd:fresh green', 'xkcd:clay']#, 'xkcd:bluish purple', 'xkcd:reddish']
 
 			y_log  = np.array([np.log10(y_test[:, slices[p]]) for p in product]).T 
 			# bench  = [[(k,b[i:i+y_log.shape[1]]) for k,b in bench.items() for i in range(0, len(bench), y_log.shape[1])]
@@ -592,12 +592,12 @@ def main():
 				# fig, axes = plt.subplots(2, 2, sharey=False, figsize=(8,7))
 				bench_order = None
 				if n_plots > 3 or 'chl' in product:
-					bench_order = ['Smith_Blend', 'OC6', 'Mishra_NDCI', 'Gons_2band', 'Gilerson_2band']
-					bench_order = ['OC3', 'Smith_Blend']#'XGB', 'SVM', 'MLP', 'KNN']
+					# bench_order = ['Smith_Blend', 'OC3', 'Mishra_NDCI', 'Gons_2band', 'Gilerson_2band']
+					bench_order = ['OC3', 'XGB', 'SVM', 'MLP', 'KNN']
 					bench_order = [b for b in bench_order if b in bdict]
 					n_plots = len(bench_order) + 1
-					# fig, axes = plt.subplots(2, (n_plots+1)//2, sharey=False, figsize=(5*((n_plots+1)//2),10))
-					fig, axes = plt.subplots(n_target, n_plots, sharey=False, figsize=(n_plots*5,n_target*5+2))
+					fig, axes = plt.subplots(2, (n_plots+1)//2, sharey=False, figsize=(5*((n_plots+1)//2),10))
+					# fig, axes = plt.subplots(n_target, n_plots, sharey=False, figsize=(n_plots*5,n_target*5+2))
 
 				else:
 					bench_order = ['QAA']#, 'GIOP']
@@ -691,7 +691,9 @@ def main():
 							plt.xlabel(r'$\mathbf{%s}$' % (r'Measured\ '+fr'{prod_lbl}\ '+unit), fontsize=20, fontweight='bold', labelpad=10)
 							plot_title = get_sensor_label(args.sensor).replace('-',' ').replace(' ', '\ ')
 							# plt.title(r'$\mathbf{\underline{\large{In\ Situ}}}$', fontsize=24, y=1.05)
-							plt.title(r'$\mathbf{\underline{\large{%s}}}$'%plot_title + '\n' + r'$\small{\mathit{N\small{=}}%s}$'%len(y_true), fontsize=24, y=1.09)
+							# plot_title = 'In\ Situ'
+							plot_title = 'Type\ A'
+							plt.title(r'$\mathbf{\underline{\large{%s}}}$'%plot_title + '\n' + r'$\small{\mathit{N\small{=}}%s}$'%len(y_true), fontsize=24, y=1.06)
 
 						if product not in ['chl', 'tss']:
 							wvl = int(get_sensor_bands(args.sensor, args)[plt_idx])

@@ -74,7 +74,7 @@ def draw_map(*lonlats, scale=0.2, world=False, us=True, eu=False, labels=[], ax=
 	ax = m.ax if m.ax is not None else plt.gca()
 
 	if not world:
-		m.readshapefile(Path(__file__).parent.joinpath('map files', 'st99_d00').as_posix(), name='states', drawbounds=True, color='k', linewidth=0.5, zorder=11)
+		m.readshapefile(Path(__file__).parent.joinpath('map_files', 'st99_d00').as_posix(), name='states', drawbounds=True, color='k', linewidth=0.5, zorder=11)
 		m.fillcontinents(color=(0,0,0,0), lake_color='#9abee0', zorder=9)
 		m.drawrivers(linewidth=0.2, color='blue', zorder=9)
 		m.drawcountries(color='k', linewidth=0.5)
