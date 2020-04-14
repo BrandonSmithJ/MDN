@@ -3,7 +3,7 @@
 ### About
 This repository contains source code for the following papers:
 
-- <i>["Seamless retrievals of chlorophyll-a from Sentinel-2 (MSI) and Sentinel-3 (OLCI) in inland and coastal waters: A machine-learning approach"](https://www.researchgate.net/publication/339119073_Seamless_retrievals_of_chlorophyll-a_from_Sentinel-2_MSI_and_Sentinel-3_OLCI_in_inland_and_coastal_waters_A_machine-learning_approach). N. Pahlevan, et al. (2020). Remote Sensing of Environment. 111604. 10.1016/j.rse.2019.111604.</i>
+- <i>["Seamless retrievals of chlorophyll-a from Sentinel-2 (MSI) and Sentinel-3 (OLCI) in inland and coastal waters: A machine-learning approach"](https://www.sciencedirect.com/science/article/pii/S0034425719306248). N. Pahlevan, et al. (2020). Remote Sensing of Environment. 111604. 10.1016/j.rse.2019.111604.</i>
 
 <br>
 
