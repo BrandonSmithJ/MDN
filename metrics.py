@@ -51,7 +51,7 @@ def mae(y1, y2):
 	i  = np.logical_and(np.isfinite(y1), np.isfinite(y2))
 	y1 = y1[i]
 	y2 = y2[i]
-	return 10**np.median(np.abs(y1 - y2))-1
+	return 10**np.mean(np.abs(y1 - y2))-1
 
 
 @label('RMSLE')
@@ -129,15 +129,38 @@ def leqznan(y1, y2=None):
 @flatten
 @only_valid
 def mape(y1, y2):
-	''' Median Absolute Percentage Error '''
-	return np.median(np.abs((y1 - y2) / y1)) * 100
+	''' Mean Absolute Percentage Error '''
+	return 100 * np.mean(np.abs((y1 - y2) / y1))
+
+
+@label('MSA')
+@flatten
+@only_valid
+def msa(y1, y2):
+	''' Median Symmetric Accuracy '''
+	# https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2017SW001669
+	Q = np.log(y2 / y1)
+	i = np.isfinite(Q)
+	return 100 * (np.exp(np.median(np.abs(Q[i]))) - 1)
+
+
+@label('SSPB')
+@flatten
+@only_valid
+def sspb(y1, y2):
+	''' Symmetric Signed Percentage Bias '''
+	# https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2017SW001669
+	Q = np.log(y2 / y1)
+	i = np.isfinite(Q)
+	M = np.median(Q[i])
+	return 100 * np.sign(M) * (np.exp(np.abs(M)) - 1)
 
 
 @label('Bias')
 @flatten
 @only_valid
 def bias(y1, y2):
-	''' Median Bias '''
+	''' Mean Log Bias '''
 	# return np.median(y2 - y1)
 	i  = np.logical_and(y1 > 0, y2 > 0)
 	y1 = np.log10(y1[i])
@@ -145,7 +168,7 @@ def bias(y1, y2):
 	i  = np.logical_and(np.isfinite(y1), np.isfinite(y2))
 	y1 = y1[i]
 	y2 = y2[i]
-	return 10**np.median(y2 - y1)-1
+	return 10**np.mean(y2 - y1)-1
 
 
 @label('Slope')
@@ -199,7 +222,7 @@ def mwr(y1, y2, y3):
 	return stats.sum() / np.isfinite(y1).sum()
 
 
-def performance(key, y1, y2, metrics=[rmse, slope, mape, rmsle, bias, mae, leqznan]):#[rmse, rmsle, mape, r_squared, bias, mae, leqznan, slope]):
+def performance(key, y1, y2, metrics=[rmse, slope, msa, rmsle, sspb, mae, leqznan]):#[rmse, rmsle, mape, r_squared, bias, mae, leqznan, slope]):
 	''' Return a string containing performance using various metrics. 
 		y1 should be the true value, y2 the estimated value. '''
 	return '%8s | %s' % (key, '   '.join([
