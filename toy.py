@@ -3,13 +3,14 @@ from collections import defaultdict as dd
 from tqdm import trange
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from matplotlib.patches import Ellipse
 from matplotlib.colors import LogNorm
 
 from .utils import add_stats_box, add_identity
 from .benchmarks import bench_ml 
 from .parameters import get_args 
-from .metrics import mae, mape, rmsle, slope
+from .metrics import mae, mape, rmsle, slope, msa, sspb
 from .mdn import MDN 
 
 import numpy as np 
@@ -47,12 +48,12 @@ def get_data(dep_noise_pct, ind_noise_pct):
 	y_ind_noise = ind_noise_pct * np.random.normal(size=y_data.shape) * np.abs(y_data).mean()
 
 	# Add noise
-	v = x_dep_noise + x_ind_noise 
-	# v = 0.05 * np.random.normal(size=x_data.shape) * x_data
+	# v = x_dep_noise + x_ind_noise 
+	v = 0.05 * np.random.normal(size=x_data.shape) * x_data
 	x_data += v
 	x_orig += v
-	# y_data += y_dep_noise + y_ind_noise
-	y_data += 0.05 * np.random.normal(size=y_data.shape) * np.abs(y_data).mean()
+	y_data += y_dep_noise + y_ind_noise
+	# y_data += 0.05 * np.random.normal(size=y_data.shape) * np.abs(y_data).mean()
 	# x_orig += x_dep_noise + x_ind_noise
 
 	# Gather test, evenly across x space
@@ -436,21 +437,39 @@ if __name__ == '__main__':
 
 
 	else:
-		metrics = [(m, m.__name__) for m in [mape, mae]]
-		n_trials= 30
+		metrics = [(m, m.__name__.replace('MSA', 'Error').replace('SSPB','Bias')) for m in [msa, sspb]]
+		# metrics[1] = (lambda *args, **kwargs: np.abs(sspb(*args, **kwargs)), '|Bias|')
+		n_trials= 10
 
 		n_rows = 2
 		n_cols = len(metrics) + 1
 
-		dep_noise = np.linspace(0, 0.5, 2)
+		dep_noise = [0]#np.linspace(0, 0.5, 2)
 		ind_noise = np.linspace(0, 0.5, 11)
 
 		stats_noise   = dd(lambda: dd(lambda: dd(lambda: dd(list))))
 		stats_nonoise = dd(lambda: dd(lambda: dd(lambda: dd(list))))
 
-		# kwargs['no_load'] = True 
+
+		kwargs = {
+			# 'n_mix'      : 10,
+			# 'n_layers'   : 5,
+			# 'n_hidden'   : 200,
+			'n_iter'     : 100000,
+			'no_bagging' : True,
+			# 'n_redraws'  : 50,
+			# 'batch': 256,
+			# 'l2': 1e-5,
+			# 'alpha': 1e-2,
+			# 'lr': 1e-2,
+			# 'independent_outputs' : True,
+			'verbose': True,
+		}
+
+		kwargs['no_load'] = True 
 		for dep_noise_pct in dep_noise:
 			plt.figure(figsize=(4*n_cols,4*n_rows))
+			plt.subplots_adjust(wspace=0.3)
 			plt.ion()
 			plt.show()
 			axes = [[plt.subplot2grid((n_rows, n_cols), (i, j)) for j in range(n_cols)] for i in range(n_rows)]
@@ -461,8 +480,8 @@ if __name__ == '__main__':
 				nonoise_stats = dd(list)
 				for _ in range(n_trials):
 					# Gather estimates
-					# x_train, y_train, x_valid, y_valid, x_test, y_test, x_nonoise, y_nonoise = get_data(dep_noise_pct, ind_noise_pct)
-					x_train, y_train, x_valid, y_valid, x_test, y_test, x_nonoise, y_nonoise = get_data(ind_noise_pct, dep_noise_pct)
+					x_train, y_train, x_valid, y_valid, x_test, y_test, x_nonoise, y_nonoise = get_data(dep_noise_pct, ind_noise_pct)
+					# x_train, y_train, x_valid, y_valid, x_test, y_test, x_nonoise, y_nonoise = get_data(ind_noise_pct, dep_noise_pct)
 				
 					benchmarks_noise, benchmarks_nonoise = bench_ml(None, None, x_train, y_train, x_valid, y_valid, x_other=x_nonoise, scale=False, bagging=False, silent=True, gridsearch=False)
 
@@ -500,6 +519,8 @@ if __name__ == '__main__':
 					for i, (metric, name) in enumerate(metrics, 1):
 						axes[0][i].set_title(name, fontsize=18)
 						axes[1][i].set_xlabel('Noise', fontsize=18)
+						axes[0][i].yaxis.set_major_formatter(ticker.PercentFormatter(decimals=0))
+						axes[1][i].yaxis.set_major_formatter(ticker.PercentFormatter(decimals=0))
 					axes[0][0].set_ylabel(f'Validation With {ind_noise_pct*100:.0f}% Noise', fontsize=18)
 					axes[1][0].set_ylabel('Validation Without Noise', fontsize=18)
 					
@@ -520,7 +541,7 @@ if __name__ == '__main__':
 							print(method, name, perf_w_noise, perf_wo_noise)
 
 							for j, perf in enumerate([stats_noise, stats_nonoise]):
-								val = perf[metric.__name__][method][dep_noise_pct]
+								val = perf[name][method][dep_noise_pct]
 								avg = np.array([np.mean(val[k]) for k in ind_noise[:ind_idx+1]])
 								std = np.array([np.std(val[k]) for k in ind_noise[:ind_idx+1]])
 
@@ -545,7 +566,8 @@ if __name__ == '__main__':
 
 				print(f'\n{ind_noise_pct}\n------')
 			print(f'\n{dep_noise_pct}\n------')
-			input('continue?')
-			plt.savefig('toy.png', dpi=200, bbox_inches='tight', pad_inches=0.1, extra_artists=[leg])
-
+			# input('continue?')
+			plt.savefig('toy_y.png', dpi=200, bbox_inches='tight', pad_inches=0.1, extra_artists=[leg])
+			plt.ioff()
+			plt.close()
 			

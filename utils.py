@@ -1,6 +1,6 @@
 from .transformers import CustomUnpickler, RatioTransformer, ColumnTransformer
 from .meta import get_sensor_bands, SENSOR_BANDS
-from .metrics import bias, slope, rmsle, mape, mae, rmse, r_squared
+from .metrics import bias, slope, rmsle, mape, mae, rmse, r_squared, sspb, msa 
 from .parameters import update, hypers
 from .__version__ import __version__
 
@@ -87,7 +87,7 @@ def add_identity(ax, *line_args, **line_kwargs):
 	ax.annotate(r'$\mathbf{1:1}$', xy=(0.87,0.99), size=11, **ann_kwargs)
 
 
-def add_stats_box(ax, y_true, y_est, metrics=[bias, slope, rmsle, mape, mae], bottom_right=False, x=0.025, y=0.97, fontsize=16):
+def add_stats_box(ax, y_true, y_est, metrics=[slope, sspb, msa], bottom_right=False, x=0.025, y=0.97, fontsize=16):
 	''' Add statistics box to a plot '''
 	import matplotlib.pyplot as plt
 	plt.rc('text', usetex=True)
@@ -95,14 +95,17 @@ def add_stats_box(ax, y_true, y_est, metrics=[bias, slope, rmsle, mape, mae], bo
 
 	longest = max([len(metric.__name__) for metric in metrics])
 	statbox = []
+	percent = ['mape', 'sspb', 'msa']
 	for metric in metrics:
-		name  = metric.__name__
-		diff  = longest-len(name)
+		name  = metric.__qualname__
+		label = metric.__name__.replace('SSPB', 'Bias').replace('MSA', 'Error')
+		diff  = longest-len(label)
 		space = r''.join([r'\ ']*diff + [r'\thinspace']*diff)
-		stat  = str(round(metric(y_true, y_est), 1 if name == 'MAPE' else 3))
-		stat += r'$\small{\mathsf{\%}}$' if name == 'MAPE' else ''
+		prec  = 1 if name in percent else 3
+		stat  = f'{metric(y_true, y_est):.{prec}f}'
+		perc  = r'$\small{\mathsf{\%}}$' if name in percent else ''
 
-		statbox.append(rf'$\mathtt{{{name}}}{space}:$ {stat}')
+		statbox.append(rf'$\mathtt{{{label}}}{space}:$ {stat}{perc}')
 
 	ann_kwargs = {
 		'transform'  : ax.transAxes,

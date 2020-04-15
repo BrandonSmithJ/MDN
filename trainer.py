@@ -14,7 +14,7 @@ import warnings, os
 class DefaultArgs:
 	verbose   = False
 	plot_loss = False 
-
+	animate   = False
 
 class BatchIndexer:
 	''' Returns minibatches of data for stochastic optimization. Allows 
