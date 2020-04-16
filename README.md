@@ -30,6 +30,8 @@ Or, a .csv file may be given as input, with each row as a single sample. The .cs
 
 `python3 -m MDN --sensor <S2A, S2B, or OLCI> path/to/my/Rrs.csv`
 
+*Note:* The user-supplied input values should correspond to R<sub>rs</sub> (units of 1/sr). 
+
 Current performance is shown in the following scatter plots, with 50% of the data used for training and 50% for testing. Note that the models supplied in this repository are trained using 100% of the <i>in situ</i> data, and so observed performance may differ slightly. 
 
 <p align="center">
