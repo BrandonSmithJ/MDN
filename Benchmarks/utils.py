@@ -7,20 +7,41 @@ import warnings
 
 def find_band_idx(w, wavelengths):
 	# Index of closest wavelength
+	wavelengths = np.array(wavelengths)
 	return np.abs(wavelengths - np.atleast_1d(w)[:,None]).argmin(1) 	
 
 
 def closest_band(w, wavelengths):
 	# Value of closest wavelength
+	wavelengths = np.array(wavelengths)
 	return wavelengths[find_band_idx(w, wavelengths)]
 
 
 def has_band(w, wavelengths, tol=5):
 	# Closest band within <tol> nm
-	return abs(w - closest_band(w, wavelengths)) <= tol
+	wavelengths = np.array(wavelengths)
+	return np.abs(w - closest_band(w, wavelengths)) <= tol
 
 
-def get_required(Rrs, wavelengths, required, tol=5):
+def to_rrs(Rrs):
+	# Conversion to subsurface reflectance (Lee et al. 2002)
+	return Rrs / (0.52 + 1.7 * Rrs)
+
+
+def to_Rrs(rrs):
+	# Inverse of to_rrs - conversion from subsurface to remote sensing reflectance
+	return (rrs * 0.52) / (1 - rrs * 1.7)
+
+
+def get_required(Rrs, wavelengths, required=[], tol=5):
+	''' 
+	Checks that all required wavelengths are available in the given data. 
+	Returns an object which acts as a functional interface into the Rrs data,
+	allowing a wavelength or set of wavelengths to be returned:
+		Rrs = get_required(Rrs, ...)
+		Rrs(443)        # Returns a matrix containing the band data closest to 443nm (shape [N, 1])
+		Rrs([440, 740]) # Returns a matrix containing the band data closest to 440nm, and to 740nm (shape [N, 2])
+	'''
 	wavelengths = np.array(wavelengths)
 	Rrs = np.atleast_2d(Rrs)
 	assert(Rrs.shape[1] == len(wavelengths)), \
