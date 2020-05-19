@@ -1,0 +1,45 @@
+Created: 2020-05-19 12:43:42.128077
+Version: 1.0.0
+--------------
+add_noise: False
+add_ratio: False
+align: None
+batch: 128
+benchmark: False
+boosting: False
+epsilon: 0.001
+fix_tchl: False
+l2: 0.001
+lr: 0.001
+model_lbl: 
+n_hidden: 100
+n_iter: 10000
+n_layers: 5
+n_mix: 5
+no_bagging: False
+product: bb_p
+sat_bands: False
+seed: 1234
+sensor: OLI
+x_scalers: [('RobustScaler', [], {})]
+y_scalers: [('LogTransformer', [], {}), ('MinMaxScaler', [(-1, 1)], {})]
+--------------
+animate: False
+avg_est: False
+darktheme: False
+filename: None
+model_loc: /media/brandon/NASA/MDN/MDN/Benchmarks/tss/SOLID/MDN_Model
+n_redraws: 50
+n_rounds: 10
+no_load: False
+no_save: False
+plot_loss: False
+plot_map: False
+silent: False
+test_loc: /media/brandon/NASA/Data/Test
+test_set: all
+threshold: None
+train_loc: /media/brandon/NASA/Data/Train
+use_cache: False
+use_sim: True
+verbose: False
