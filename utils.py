@@ -1,6 +1,6 @@
 from .transformers import CustomUnpickler, RatioTransformer, ColumnTransformer
 from .meta import get_sensor_bands, SENSOR_BANDS
-from .metrics import bias, slope, rmsle, mape, mae, rmse, r_squared, sspb, msa 
+from .metrics import bias, slope, rmsle, mape, mae, rmse, r_squared, sspb, mdsa 
 from .parameters import update, hypers
 from .__version__ import __version__
 
@@ -87,7 +87,7 @@ def add_identity(ax, *line_args, **line_kwargs):
 	ax.annotate(r'$\mathbf{1:1}$', xy=(0.87,0.99), size=11, **ann_kwargs)
 
 
-def add_stats_box(ax, y_true, y_est, metrics=[slope, sspb, msa], bottom_right=False, x=0.025, y=0.97, fontsize=16):
+def add_stats_box(ax, y_true, y_est, metrics=[mdsa, sspb, slope], bottom_right=False, x=0.025, y=0.97, fontsize=16):
 	''' Add statistics box to a plot '''
 	import matplotlib.pyplot as plt
 	plt.rc('text', usetex=True)
@@ -95,7 +95,7 @@ def add_stats_box(ax, y_true, y_est, metrics=[slope, sspb, msa], bottom_right=Fa
 
 	longest = max([len(metric.__name__) for metric in metrics])
 	statbox = []
-	percent = ['mape', 'sspb', 'msa']
+	percent = ['mape', 'sspb', 'mdsa']
 	for metric in metrics:
 		name  = metric.__qualname__
 		label = metric.__name__.replace('SSPB', 'Bias').replace('MSA', 'Error')
@@ -194,9 +194,8 @@ def generate_config(args, create=True):
 				
 	config = '\n'.join(config)
 	others = '\n'.join(others)
-	label  = [args.model_lbl] if args.model_lbl else []
 	uid    = hashlib.sha256(config.encode('utf-8')).hexdigest()
-	folder = Path(__file__).parent.resolve().joinpath(args.model_loc, args.sensor, '_'.join(label + [uid]))
+	folder = Path(__file__).parent.resolve().joinpath(args.model_loc, args.sensor, args.model_lbl, uid)
 	conf_file = folder.joinpath('config')
 
 	if create:
@@ -242,8 +241,21 @@ def load_data(keys, locs, _wavelengths):
 			if data.shape[1] > 1 and data.dtype.type is not np.str_:
 				valid = get_valid(name, loc, wavelengths)
 				data  = data[:, valid]
+
+				# If we want to get all data, regardless of if bands are available...
+				# new_data = [[np.nan]*len(data)] * len(wavelengths)
+				# wvls  = np.loadtxt(Path(loc).joinpath(f'{name}_wvl.csv'), delimiter=',')[:,None]
+				# idxs  = np.abs(wvls - np.atleast_2d(wavelengths)).argmin(0)
+				# valid = np.abs(wvls - np.atleast_2d(wavelengths)).min(0) < 2
+
+				# for j, (i, v) in enumerate(zip(idxs, valid)):
+				# 	print(j, i, v)
+				# 	if v: new_data[j] = data[:, i]
+				# data = np.array(new_data).T
+
 			return data 
 		except Exception as e:
+			assert(0)
 			if dloc.exists():
 				print(f'Error fetching {name} from {loc}: {e}')
 			if name not in ['Rrs']:# ['../chl', '../tss', '../cdom']:
@@ -286,7 +298,7 @@ def load_data(keys, locs, _wavelengths):
 			print(f'Error {loc}: {e}')
 			if len(np.atleast_1d(locs)) == 1:
 				raise e
-	assert(len(x_data) > 0), 'No datasets are valid with the given wavelengths'
+	assert(len(x_data) > 0 or len(locs) == 0), 'No datasets are valid with the given wavelengths'
 	assert(all([x.shape[1] == x_data[0].shape[1] for x in x_data])), f'Differing number of {keys[0]} wavelengths: {[x.shape for x in x_data]}'
 
 	# Determine the number of features each key should have
@@ -471,7 +483,7 @@ def get_data(args):
 		if p == '../chl':
 			folders = [f for f in folders if f not in ['Bunkei_a', 'Caren']]
 			if args.test_set == 'paper': # MSI / OLCI paper
-				folders = ['Sundar', 'Taihu', 'Taihu2', 'Schalles', 'SeaBASS2', 'Vietnam'] 
+				folders = ['Sundar', 'UNUSED/Taihu_old', 'UNUSED/Taihu2', 'UNUSED/Schalles_old', 'SeaBASS2', 'Vietnam'] 
 
 		if p == 'bb_p':
 			folders = ['UNUSED/248']
@@ -503,6 +515,7 @@ def get_data(args):
 		print('Using in situ samples as training data.')
 	else: 
 		train_folder = ['848']
+		test_folder = []
 
 	# Use a cached data set if available, to speed up fetching
 	cache_name = 'Cache/%s_%s_%s_%s.pkl' % (args.sensor, 
@@ -524,7 +537,13 @@ def get_data(args):
 
 		if args.use_sim:
 			x_train, y_train, train_slices, train_locs = load_data(train_keys, train_loc, get_sensor_bands(args.sensor, args))
-			x_test,  y_test,  test_slices,  test_locs  = load_data(test_keys,  test_loc,  get_sensor_bands(args.sensor, args)) 
+			if len(test_loc):
+				x_test,  y_test,  test_slices,  test_locs  = load_data(test_keys,  test_loc,  get_sensor_bands(args.sensor, args)) 
+			else:
+				x_test = x_train
+				y_test = y_train
+				test_slices = train_slices
+				test_locs = train_locs
 		else:
 			x_train, y_train, train_slices, train_locs = \
 			x_test,  y_test,  test_slices,  test_locs  = load_data(train_keys, train_loc, get_sensor_bands(args.sensor, args))
@@ -553,7 +572,7 @@ def get_data(args):
 
 		else:
 			x_train, y_train, x_test, y_test, locs = get_valid(x_train, y_train, x_test, y_test, train_slices, partial_nan=len(test_keys) > 2, other=[test_locs, test_idxs])
-		
+			# locs = (test_locs, test_idxs)
 		idxs = locs[1]
 		locs = locs[0]
 
@@ -563,6 +582,7 @@ def get_data(args):
 
 		# Correct chl data for pheopigments
 		if 'chl' in args.product and ((hasattr(args, 'fix_tchl') and args.fix_tchl) or (hasattr(args, 'keep_tchl') and not args.keep_tchl)):
+
 			fix = np.ones(len(x_train)).astype(np.bool)
 			old = y_train.copy()
 
@@ -603,11 +623,6 @@ def get_data(args):
 			# plt.show()
 			# assert(0)
 
-		if (hasattr(args, 'no_ratio') and not args.no_ratio) or (hasattr(args, 'add_ratio') and args.add_ratio):
-			x_train = RatioTransformer().fit_transform(x_train)
-			if args.use_sim:
-				x_test  = RatioTransformer.fit_transform(x_test)
-
 		return x_train, y_train, x_test, y_test, train_slices, (idxs, locs)
 
 	aligned = getattr(args, 'align', None)
@@ -639,7 +654,7 @@ def get_data(args):
 
 def bagging_subset(args, x_train, y_train, x_scalers, y_scalers, percent=0.75):
 	# Return a subset of the training data to allow bagging
-	using_ratio = (hasattr(args, 'no_ratio') and not args.no_ratio) or (hasattr(args, 'add_ratio') and args.add_ratio) #or len(x_train.T) > 12
+	# using_ratio = (hasattr(args, 'no_ratio') and not args.no_ratio) or (hasattr(args, 'add_ratio') and args.add_ratio) #or len(x_train.T) > 12
 
 	pct  = 0.75
 	rows = np.arange(len(x_train))
@@ -660,6 +675,6 @@ def bagging_subset(args, x_train, y_train, x_scalers, y_scalers, percent=0.75):
 	x_train  = x_train[rows[:nrow]]
 	y_train  = y_train[rows[:nrow]]
 
-	if using_ratio:
-		x_scalers = [store_scaler(ColumnTransformer, args=[np.append(np.arange(len(get_sensor_bands(args.sensor, args))), cols[:ncol])])] + x_scalers
+	# if using_ratio:
+	# 	x_scalers = [store_scaler(ColumnTransformer, args=[np.append(np.arange(len(get_sensor_bands(args.sensor, args))), cols[:ncol])])] + x_scalers
 	return x_scalers, y_scalers, x_train, y_train, x_remain, y_remain

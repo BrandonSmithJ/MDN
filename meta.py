@@ -59,7 +59,9 @@ SENSOR_BANDS = {
 	'ETM'      : [               483,      560,                     662                                   ],
 	'ETM-pan'  : [               483,      560,                     662,                               706],
 	'OLI'      : [     443,      482,      561,                     655                                   ],
+	'OLI-rho'  : [     443,      482,      561,                     655,                                   865, 1609, 2201],
 	'OLI-pan'  : [     443,      482,      561,                     655,                               589],
+	'OLI-full' : [     443,      482,      561, 589,                655,                               865],
 	'OSMI'     : [412, 443,      490,      555,                                              765          ],
 	'POLDER'   : [     443,      490,      565,                     670,                     765          ],
 	'AER'      : [412, 442,      490, 530, 551,                     668                                   ],
@@ -103,6 +105,12 @@ duplicates = {
 for sensor, dups in duplicates.items():
 	for dup in dups:
 		SENSOR_BANDS[dup] = SENSOR_BANDS[sensor]
+
+for sensor in SENSOR_BANDS:
+	if '-' in sensor:
+		s = sensor.split('-')[0]
+		if sensor not in SENSOR_LABEL:
+			SENSOR_LABEL[sensor] = SENSOR_LABEL[s]
 
 def get_sensor_bands(sensor, args=None):
 	assert(sensor in SENSOR_BANDS), f'Unknown sensor: {sensor}'

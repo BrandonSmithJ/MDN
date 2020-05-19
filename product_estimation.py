@@ -14,10 +14,10 @@ from tqdm  import trange, tqdm
 from .mdn   import MDN
 from .meta  import get_sensor_bands, get_sensor_label, SENSOR_LABEL
 from .utils import add_identity, get_labels, get_data, find_wavelength, generate_config, bagging_subset, store_scaler, add_stats_box
-from .metrics import performance, rmse, rmsle, leqznan, mape, r_squared, slope, nrmse, malar, mwr, bias, mae
+from .metrics import performance, rmse, rmsle, leqznan, mape, r_squared, slope, nrmse, mwr, bias, mae
 from .benchmarks import print_benchmarks
 from .parameters import get_args
-from .transformers import TransformerPipeline, LogTransformer, NegLogTransformer
+from .transformers import TransformerPipeline, LogTransformer, NegLogTransformer, RatioTransformer, BaggingColumnTransformer
 
 
 def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, output_slices=None):
@@ -25,9 +25,14 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 	Estimate all target variables for the given x_test. If a model doesn't 
 	already exist, creates a model with the given training data. 
 	'''
+
 	if x_train is not None:
 		x_train_orig = x_train.copy()
 		y_train_orig = y_train.copy()
+
+	wavelengths   = get_sensor_bands(args.sensor, args)
+	using_bagging = (hasattr(args, 'no_bagging') and not args.no_bagging) or (hasattr(args, 'bagging') and args.bagging) 
+	using_ratio   = (hasattr(args, 'no_ratio') and not args.no_ratio) or (hasattr(args, 'add_ratio') and args.add_ratio)
 
 	args.x_scalers = [
 			store_scaler(preprocessing.RobustScaler),
@@ -39,6 +44,17 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 		store_scaler(LogTransformer),
 		store_scaler(preprocessing.MinMaxScaler, [(-1, 1)]),
 	]
+
+
+	if using_bagging and (using_ratio or (x_train is not None and x_train.shape[1] > 20) or (x_test is not None and x_test.shape[1] > 20)):
+		args.x_scalers = [
+			store_scaler(BaggingColumnTransformer, [len(wavelengths) + len(get_sensor_bands(args.sensor.replace('-rho',''), args))]),
+		] + args.x_scalers
+	
+	if using_ratio:
+		args.x_scalers = [
+			store_scaler(RatioTransformer, [list(wavelengths)]),
+		] + args.x_scalers
 
 	model_path = generate_config(args, create=x_train is not None)
 	if args.verbose: print(f'Using model path {model_path}')
@@ -52,8 +68,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 		x_scalers = list(args.x_scalers)
 		y_scalers = list(args.y_scalers)
 
-		using_bagging = ((hasattr(args, 'bagging') and args.bagging) or (hasattr(args, 'no_bagging') and not args.no_bagging))
-		if x_train is not None and using_bagging and args.n_rounds > 1:
+		if using_bagging and x_train is not None and args.n_rounds > 1:
 			x_scalers, y_scalers, x_train, y_train, x_remain, y_remain = bagging_subset(args, x_train_orig, y_train_orig, x_scalers, y_scalers)
 		else:
 			x_remain = y_remain = None 
@@ -96,7 +111,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 
 			if args.verbose and y_test is not None:
 				median = np.sum(preds, 0) if args.boosting else np.median(preds, 0)
-				labels = [k + ('%i'%get_sensor_bands(args.sensor, args)[i] if (v.stop-v.start) > 1 else '') 
+				labels = [k + (f'{wavelengths[i]:.0f}' if (v.stop-v.start) > 1 else '') 
 								for k,v in sorted(output_slices.items(), key=lambda pi: pi[1].start) 
 								for i   in range(v.stop - v.start)][:y_test.shape[1]]
 				for j, lbl in enumerate(labels):
@@ -107,12 +122,12 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 	return preds, model.output_slices
 
 
-def apply_model(x_test, **kwargs):
+def apply_model(x_test, use_cmdline=True, **kwargs):
 	''' 
 	Apply a model (defined by kwargs 
 	and default parameters) to x_test 
 	'''
-	args = get_args(kwargs)
+	args = get_args(kwargs, use_cmdline=use_cmdline)
 	preds, idxs = get_estimates(args, x_test=x_test)
 	return np.median(preds, 0), idxs
 
@@ -261,20 +276,41 @@ def main():
 		assert('0' not in dataset_lbls), f'Error: {(dataset_lbls == "0").sum()} missing dataset indices'
 		missing = np.any(np.isnan(full_lonlats), 1)
 		if missing.any(): print(f'\nWarning: {missing.sum()} missing lon/lat coordinates:\n{count_labels(dataset_lbls[missing])}')
-
+		ll = np.vstack(full_lonlats)
+		
+		# assert(0)
 		# for a,b in zip(dataset_lbls, full_lonlats):
 		# 	print(a,':',b)
 		# assert(0)
 		import matplotlib.pyplot as plt 
 
+		import pandas as pd 
+		d = pd.read_csv('parsed_WOD.csv'); n='WOD'
+		# d = pd.read_csv('parsed_ndbc.csv'); n='NDBC'
+		print(d.shape, d[['lon','lat']].to_numpy().shape)
+		print(len(np.unique(d['lon'].to_numpy())), len(np.unique(d['lat'].to_numpy())))
+		print(d['chl'].min(), d['chl'].max())
+		draw_map(d[['lon','lat']].to_numpy(), color='r', edgecolor='grey', linewidth=0.1, s=8, world=True)
+		plt.savefig(f'{n}_map.png', bbox_inches='tight', pad_inches=0.05, dpi=250)
+		plt.show()
+		assert(0)
 		# Label each dataset
 		if False:
 			order = list(np.unique(dataset_lbls))
 			full_lonlats = [full_lonlats[dataset_lbls == o] for o in order]
 			draw_map(*full_lonlats, labels=order, s=8, world=True)
 		else:
-			draw_map(full_lonlats, color='r',edgecolor='grey', linewidth=0.1, s=8, world=True)
+			# draw_map(full_lonlats, color='r',edgecolor='grey', linewidth=0.1, s=8, world=True)
 
+			for lbl, k in [('na',(ll[:, 0] < -30) & (ll[:,1] > 10)), 
+							('sa',(ll[:, 0] < -30) & (ll[:,1] < 10)),
+							('aus',(ll[:, 0] > 50) & (ll[:,1] < 0)),
+							('asia',(ll[:, 0] > 50) & (ll[:,1] > 0)),
+							('eu',(ll[:, 0] < 50) & (ll[:,0] > -30) & (ll[:,1] > 0))]:
+				print(lbl, k.sum())
+				draw_map(ll[k], color='r',edgecolor='grey', linewidth=0.1, s=8, world=True)
+				plt.show()
+			assert(0)
 		plt.savefig('insitu_map.png', bbox_inches='tight', pad_inches=0.05, dpi=250)
 		plt.show()		
 
@@ -292,11 +328,16 @@ def main():
 			import matplotlib.patheffects as pe 
 			import seaborn as sns 
 
+		if args.test_set == 'paper':
+			setattr(args, 'fix_tchl', True)
+			setattr(args, 'seed', 1234)
+
 		np.random.seed(args.seed)
 
 		x_data, y_data, x_test, y_test, slices, locs = get_data(args)
 		print('\n',x_data.shape, y_data.shape, np.array(locs).shape)
-
+		# np.savetxt('data.csv', x_data, delimiter=',')
+		# assert(0)
 		data_idxs = np.arange(len(x_data))
 		use_mdn   = True
 		product   = args.product.split(',') if args.product != 'all' else ['chl']
@@ -307,7 +348,7 @@ def main():
 			if not args.use_sim:
 				# Perform a single random split, and show scatterplots
 				np.random.shuffle(data_idxs)
-				n_train = int(len(x_data)*0.5)#1000 if not args.use_sim else (len(x_data)-1)#int(0.50 * len(data_idxs))
+				n_train = 1000 if args.test_set == 'paper' else int(len(x_data)*0.5)#1000 if not args.use_sim else (len(x_data)-1)#int(0.50 * len(data_idxs))
 				n_valid = int(0. * len(data_idxs))
 				x_train = x_data[ data_idxs[:n_train] ]
 				y_train = y_data[ data_idxs[:n_train] ]
@@ -386,11 +427,12 @@ def main():
 			# print(y_test.shape)
 			# print(len(y_test), np.median(y_test))
 			# assert(0)
+			
 			estimates, est_slice = get_estimates(args, x_train, y_train, x_test, y_test, slices)
 			# test_est,  est_slice = estimate(args, x_test=x_test)
 			# test_est  = np.median(test_est, 0)[:, est_slice[product]]
 			estimates = np.median(estimates, 0)#[:, est_slice[product]]
-
+			# estimates = np.array([np.nan] * len(x_train))
 
 
 			# if True:
@@ -408,7 +450,7 @@ def main():
 			# 	assert(0)
 
 			n_wvl  = len(get_sensor_bands(args.sensor, args))
-			bench  = run_benchmarks(args, args.sensor, x_test[:,:n_wvl], y_test, {p:slices[p] for p in product}, silent=False, x_train=x_train, y_train=y_train, gridsearch=True)
+			bench  = run_benchmarks(args, args.sensor, x_test[:,:n_wvl], y_test, {p:slices[p] for p in product}, silent=False, x_train=x_train, y_train=y_train, gridsearch=False)
 			bdict  = bench
 			labels = get_labels(get_sensor_bands(args.sensor, args), slices, y_test.shape[1])
 			if 'aph' in product:
@@ -743,7 +785,7 @@ def main():
 						ax.grid('on', alpha=0.3)
 
 				plt.tight_layout()
-				plt.savefig(f'{args.product}_{args.sensor}_scatter_{n_train}train.png', dpi=200, bbox_inches='tight', pad_inches=0.1,)
+				plt.savefig(f'scatters/{args.product}_{args.sensor}_scatter_{n_train}train.png', dpi=100, bbox_inches='tight', pad_inches=0.1,)
 				plt.show()
 
 	# Otherwise, train a model with all data (if not already existing)
