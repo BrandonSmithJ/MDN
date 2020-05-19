@@ -82,9 +82,11 @@ parser.set_defaults(test_set='all', use_sim=False)
 
 
 
-def get_args(kwargs={}, **kwargs2):
+def get_args(kwargs={}, use_cmdline=True, **kwargs2):
 	kwargs2.update(kwargs)
-	args = parser.parse_args()
+
+	if use_cmdline:	args = parser.parse_args()
+	else:           args = parser.parse_args([])
 	
 	for k, v in kwargs2.items():
 		setattr(args, k, v)

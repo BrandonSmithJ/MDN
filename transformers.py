@@ -65,9 +65,67 @@ class ColumnTransformer(CustomTransformer):
 	def _transform(self, X, *args, **kwargs):		 return X[:, self._c]
 
 
+class BaggingColumnTransformer(CustomTransformer):
+	''' Randomly select a percentage of columns to drop '''
+	percent = 1#0.75
+
+	def __init__(self, n_bands, *args, **kwargs):
+		self.n_bands = n_bands
+
+	def _fit(self, X, *args, **kwargs):
+		shp  = X.shape[1] - self.n_bands
+		ncol = int(shp*self.percent)
+		cols = np.arange(shp) + self.n_bands
+		np.random.shuffle(cols)
+		self.cols = np.append(np.arange(self.n_bands), cols[:ncol], 0)
+		print(f'Reducing bands from {shp} ({X.shape[1]} total) to {ncol} ({len(self.cols)} total) ({self.cols})')
+		return self
+
+	def _transform(self, X, *args, **kwargs):
+		return X[:, self.cols]
+
+
+class ExclusionTransformer(CustomTransformer):
+	''' 
+	Exclude certain columns from being transformed by the given transformer.
+	The passed in transformer should be a transformer class, and exclude_slice can
+	be any object which, when used to slice a numpy array, will give the 
+	appropriate columns which should be excluded. So, for example:
+		- slice(1)
+		- slice(-3, None)
+		- slice(1,None,2)
+		- np.array([True, False, False, True])
+		etc.
+	'''
+	def __init__(self, exclude_slice, transformer, transformer_args=[], transformer_kwargs={}):
+		self.excl = exclude_slice
+		self.transformer = transformer(*transformer_args, **transformer_kwargs)
+
+	def _fit(self, X):
+		cols = np.arange(X.shape[1])
+		cols = [c for c in cols if c not in cols[self.excl]]
+		self.transformer.fit(X[:, cols])
+		self.keep = cols
+		return self
+
+	def _transform(self, X, *args, **kwargs):
+		Z = np.zeros_like(X)
+		Z[:, self.keep] = self.transformer.transform(X[:, self.keep])
+		Z[:, self.excl] = X[:, self.excl]
+		return Z 
+
+	def _inverse_transform(self, X, *args, **kwargs):
+		Z = np.zeros_like(X)
+		Z[:, self.keep] = self.transformer.inverse_transform(X[:, self.keep])
+		Z[:, self.excl] = X[:, self.excl]
+		return Z 
+
 
 class RatioTransformer(CustomTransformer):	
 	''' Add ratio features '''
+	def __init__(self, wavelengths, *args, **kwargs):
+		self.wavelengths = wavelengths
+
 	def _fit(self, X):
 		self.shape = X.shape[1]
 		return self 
@@ -88,82 +146,42 @@ class RatioTransformer(CustomTransformer):
 		'''
 		x     = np.atleast_2d(X)
 		x_new = [v for v in x.T]
-		if len(x_new) > 20:
-			keep  = np.array([False] * x.shape[1])
-			keep[::5] = True
-			keep[-1]  = True
-			print(f'Too many features ({x.shape[1]}) - using only a few bands ({keep.sum()})')
-			from QAA import wavelengths, find
-			# keep  = np.array([False] * x.shape[1])
-			# for i in wavelengths['OLCI']:
-			# 	keep[find(i, np.array(wavelengths['HICO']))] = True 
 
-			x_new = ratio(x[:, keep])[:, keep.sum():]
-			x_new = np.append(x, x_new, 1)
+		# Band ratios
+		if len(self.wavelengths) < 6:
+			for i, L1 in enumerate(self.wavelengths):
+				for j, L2 in enumerate(self.wavelengths):
+					if L1 < L2:
+						R1 = x[:, i]
+						R2 = x[:, j] 
+						# if len(self.wavelengths) < 6 or (L1 > 500 and L2 > 500):
+						x_new.append(R2 / R1)
+						print(f'{L2}/{L1}', np.min(x_new[-1]), np.max(x_new[-1]))
 
-		else:
-			# from QAA import wavelengths, find
-			# wavelengths = np.array(wavelengths['S2B'])
-			# b705 = find(705, wavelengths)
-			# b655 = find(560, wavelengths)
-			# b560 = find(560, wavelengths)
-			# b490 = find(443, wavelengths)
-			# assert(0), [x.max(0), x.min(0)]
-			# [443, 490, 560, 665, 705, 740, 783],
-			# x_new.append(x[:, b705] / x[:,b655])
-			# x_new.append(x[:, b560] / x[:,b490])
-			# rmax = .3
-			# rmin = 1e-5
-			# x = x.copy()
-			# # x[x > rmax] = rmax 
-			# # x[x < rmin] = rmin
+						for k, L3 in enumerate(self.wavelengths):
+							if L3 not in [L1, L2]:
+								R3 = x[:, k]
+								if len(self.wavelengths) < 6 or L3 > 500:
+									if L1 < L3:
+										x_new.append(R2 / (R1 + R3))
+									else:
+										x_new.append(R3 / (R1 + R2))
+		
 
-			# x[np.any(x > rmax, 1)] += -x[np.any(x > rmax, 1)].max(1, keepdims=True) + rmax
-			# x[np.any(x < rmin, 1)] += -x[np.any(x < rmin, 1)].min(1, keepdims=True) + rmin
-			# x_new = [v for v in x.T]
-			# x = x.round(4)
-			# x = (x*2500).astype(np.int32).astype(np.float32)/2500.
-			# x[x==0] = 1/2500.
-			for i in range(x.shape[1]):
-				for j in range(x.shape[1]):
-					x = x.copy() * 1e3
-					if i < j: 
-						x_new.append(x[:,j] * x[:,i])
-						for k in range(x.shape[1]):
-							if k != i and k != j:
-								if i < k:
-									x_new.append(x[:,j] * (x[:,i] + x[:,k]))
-								else:
-									x_new.append(x[:,k] * (x[:,i] + x[:,j]))
-			
-			def FLH():
-				from QAA import wavelengths, find
-				wvls = np.array(wavelengths['MODA'])
-				w709 = x[:, find(709, wvls)]
-				w681 = x[:, find(681, wvls)]
-				w665 = x[:, find(655, wvls)]
-				return w681 - 1.005 * (w665 + (w709 - w665) * ((681-665)/(709-665)))
-			
-			def MCI():
-				from QAA import wavelengths, find
-				wvls = np.array(wavelengths['MODA'])
-				w753 = x[:, find(753, wvls)]
-				w709 = x[:, find(709, wvls)]
-				w680 = x[:, find(680, wvls)]
-				return w709 - 1.005 * (w680 + (w753 - w680) * ((709-680)/(753-680)))
-			# x_new.append(FLH())
-			# x_new.append(MCI())
+		# Line height variations, examining height of center between two shoulder bands
+		for i, L1 in enumerate(self.wavelengths):
+			for j, L2 in enumerate(self.wavelengths):
+				for k, L3 in enumerate(self.wavelengths):
+					if (L3 > L2) and (L2 > L1) and L2 < 900:
+						if len(self.wavelengths) < 6:# or not (L1 == 655 and L2 == 865 and L3 == 1609): #L1 > 600:# and L2  600 and L3 > 600):
+							c  = (L3 - L2) / (L3 - L1)
+							R1 = x[:, i]
+							R2 = x[:, j]
+							R3 = x[:, k]
+							x_new.append(R2 - R3 - c*(R1-R3))
+							print(f'{len(self.wavelengths)} ({L3}-{L2})/({L3}-{L1})', np.min(x_new[-1]), np.max(x_new[-1]))
 
-
-			x_new = np.hstack([v[:,None] for v in x_new])
-			#if x.shape[1] > 20:
-				#print(f'Too many features ({x_new.shape[1]}) - using PCA')
-				#valid = np.all(np.logical_and(np.isfinite(x_new), x_new < 1e4), 0)
-				#x_new = x_new[:,valid]
-				#from sklearn.decomposition import FastICA as PCA
-				#p = PCA(whiten=True)
-				#x_new = p.fit_transform(x_new)[:,:x.shape[1]]
-		return x_new
+		return np.hstack([v[:,None] for v in x_new])
 
 	def _inverse_transform(self, X, *args, **kwargs): 
 		return np.array(X)[:, :self.shape]
