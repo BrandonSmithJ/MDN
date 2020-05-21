@@ -25,6 +25,12 @@ def closest_wavelength(k, waves, validate=True):
 	return w 
 
 
+def safe_int(v):
+	''' Parse int if possible, and return None otherwise '''
+	try: return int(v)
+	except: return None
+	
+
 def get_tile_Rrs(filename, sensor, allow_neg=True):
 	''' Gather the correct Rrs bands from a given tile '''
 	from netCDF4 import Dataset
@@ -33,7 +39,7 @@ def get_tile_Rrs(filename, sensor, allow_neg=True):
 			tile = tile['geophysical_data']
 	
 		tile_key = 'Rrs_' if any(['Rrs_' in k for k in tile.variables]) else 'Rw'
-		tile_wvl = [int(v.replace(tile_key, '')) for v in tile.variables if tile_key in v]
+		tile_wvl = [int(v.replace(tile_key, '')) for v in tile.variables if tile_key in v and safe_int(v.replace(tile_key, '')) is not None]
 		bands    = [closest_wavelength(b, tile_wvl) for b in get_sensor_bands(sensor)]
 		div      = np.pi if tile_key == 'Rw' else 1
 		
