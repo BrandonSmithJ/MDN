@@ -109,7 +109,7 @@ def save_training_results(args, model, datasets, i, start_time, first, metrics=[
 
 # TODO: make the random state independent from the global random state (using seed from args)
 def train_model(model, x_train, y_train, datasets={}, args=None):
-	save_results = args is not None and hasattr(args, 'save_part') and args.save_part and 'test' in datasets
+	save_results = args is not None and hasattr(args, 'save_stats') and args.save_stats and 'test' in datasets
 	plot_loss    = args is not None and args.plot_loss and 'test' in datasets
 
 	for label in datasets:

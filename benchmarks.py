@@ -256,8 +256,8 @@ def bench_qaa(args, sensor, x_test, y_test, slices, silent=False):
 			for i in range(ins_val.shape[1]):
 				if not silent:
 					print( performance('QAA %s%i' % (name, waves[i]), ins_val[:, i], est_val[:, i]) )
-				ests.append(est_val[:,i])
-				lbls.append('QAA %s%s' % (name, waves[i]))
+			ests.append(est_val)
+			lbls.append('QAA')
 		else:
 			print(list(qaa.keys()))
 			assert(0), f"{name.replace('_','')} not found in QAA outputs"
@@ -282,8 +282,8 @@ def bench_giop(args, sensor, x_test, y_test, slices, silent=False):
 				lbl = 'GIOP %s%s' % (name, waves[i] if 'chl' not in name else '')
 				if not silent:
 					print( performance(lbl, ins_val[:, i], est_val[:, i]) )
-				ests.append(est_val[:,i])
-				lbls.append(lbl)
+			ests.append(est_val)
+			lbls.append('GIOP')
 		else:
 			assert(0), f'{name} not found in GIOP outputs'
 	return dict(zip(lbls, ests))
