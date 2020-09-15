@@ -11,7 +11,7 @@ from pathlib import Path
 PLOT_WIDTH  = 8
 PLOT_HEIGHT = 6
 
-WORLD_MAP = {'cyl': [-90, 90, -180, 180]}
+WORLD_MAP = {'cyl': [-90, 85, -180, 180]}
 US_MAP    = {
 	'cyl' : [24, 49, -126, -65],
 	'lcc' : [23, 48, -121, -64],
@@ -55,16 +55,17 @@ def mark_inset(ax, ax2, m, m2, MAP, loc1=(1, 2), loc2=(3, 4), **kwargs):
 
 
 
-def draw_map(*lonlats, scale=0.2, world=False, us=True, eu=False, labels=[], ax=None, **scatter_kws):
+def draw_map(*lonlats, scale=0.2, world=False, us=True, eu=False, labels=[], ax=None, gray=False, **scatter_kws):
+	res = 'i' # 'f'
 	if world:
 		MAP    = WORLD_MAP
-		kwargs = {'projection': 'cyl', 'resolution': 'f'}
+		kwargs = {'projection': 'cyl', 'resolution': res}
 	elif us:
 		MAP    = US_MAP
-		kwargs = {'projection': 'lcc', 'lat_0':30, 'lon_0':-98, 'resolution': 'f'}#, 'epsg':4269}
+		kwargs = {'projection': 'lcc', 'lat_0':30, 'lon_0':-98, 'resolution': res}#, 'epsg':4269}
 	elif eu:
 		MAP    = EU_MAP
-		kwargs = {'projection': 'lcc', 'lat_0':48, 'lon_0':27, 'resolution': 'f'}
+		kwargs = {'projection': 'lcc', 'lat_0':48, 'lon_0':27, 'resolution': res}
 	else:
 		raise Exception('Must plot world, US, or EU')
 
@@ -76,14 +77,19 @@ def draw_map(*lonlats, scale=0.2, world=False, us=True, eu=False, labels=[], ax=
 	if not world:
 		m.readshapefile(Path(__file__).parent.joinpath('map_files', 'st99_d00').as_posix(), name='states', drawbounds=True, color='k', linewidth=0.5, zorder=11)
 		m.fillcontinents(color=(0,0,0,0), lake_color='#9abee0', zorder=9)
-		m.drawrivers(linewidth=0.2, color='blue', zorder=9)
+		if not gray:
+			m.drawrivers(linewidth=0.2, color='blue', zorder=9)
 		m.drawcountries(color='k', linewidth=0.5)
 	else:
 		m.drawcountries(color='w')
 	# m.bluemarble()
-	m.shadedrelief(scale=0.3 if world else 1)
-	# m.arcgisimage(service='ESRI_Imagery_World_2D', xpixels = 2000, verbose= True)
-
+	if not gray:
+		if us or eu: m.shadedrelief(scale=0.3 if world else 1)
+		else:
+			# m.arcgisimage(service='ESRI_Imagery_World_2D', xpixels = 2000, verbose= True)
+			m.arcgisimage(service='World_Imagery', xpixels = 2000, verbose= True)
+	else:
+		pass
 	# lats = m.drawparallels(np.linspace(MAP[0], MAP[1], 13))
 	# lons = m.drawmeridians(np.linspace(MAP[2], MAP[3], 13))
 
@@ -95,24 +101,32 @@ def draw_map(*lonlats, scale=0.2, world=False, us=True, eu=False, labels=[], ax=
 	# 	line.set(linestyle='-', alpha=0.0, color='w')
 
 	if labels:
-		assert(len(labels) == len(lonlats))
-		for label, lonlat in zip(labels, lonlats):
+		colors = ['aqua', 'orangered',  'xkcd:tangerine', 'xkcd:fresh green', 'xkcd:clay', 'magenta', 'xkcd:sky blue', 'xkcd:greyish blue', 'xkcd:goldenrod', ]
+		markers = ['o', '^', 's', '*',  'v', 'X', '.', 'x',]
+		mod_cr = False
+		assert(len(labels) == len(lonlats)), [len(labels), len(lonlats)]
+		for i, (label, lonlat) in enumerate(zip(labels, lonlats)):
 			lonlat = np.atleast_2d(lonlat)
+			if 'color' not in scatter_kws or mod_cr:
+				scatter_kws['color'] = colors[i]
+				scatter_kws['marker'] = markers[i]
+				mod_cr = True
 			ax.scatter(*m(lonlat[:,0], lonlat[:,1]), label=label, zorder=12, **scatter_kws)	
-		ax.legend(loc='best')
+		ax.legend(loc='lower left', prop={'weight':'bold', 'size':8}).set_zorder(20)
 
 	else:
 		for lonlat in lonlats:
 			if len(lonlat):
 				lonlat = np.atleast_2d(lonlat)
-				ax.scatter(*m(lonlat[:,0], lonlat[:,1]), zorder=12, **scatter_kws)
-
+				s = ax.scatter(*m(lonlat[:,0], lonlat[:,1]), zorder=12, **scatter_kws)
+				# plt.colorbar(s, ax=ax)
 	hide_kwargs = {'axis':'both', 'which':'both'}
 	hide_kwargs.update(dict([(k, False) for k in ['bottom', 'top', 'left', 'right', 'labelleft', 'labelbottom']]))
 	ax.tick_params(**hide_kwargs)
 
 	for axis in ['top','bottom','left','right']:
 		ax.spines[axis].set_linewidth(1.5)
+		ax.spines[axis].set_zorder(50)
 	# plt.axis('off')
 
 	if world:

@@ -1,5 +1,5 @@
 '''
-
+"Robust algorithm for estimating total suspended solids (TSS) in inland and nearshore coastal waters". S.V. Balasubramanian, et al. (2020).
 '''
 
 from ..utils import get_required, optimize, has_band, closest_band, find_band_idx, to_rrs
@@ -7,6 +7,14 @@ from pathlib import Path
 from MDN.product_estimation import apply_model as mdn_estimate
 import numpy as np
 
+
+model_hash = {
+	'MOD' : 'cd0c01156295ecdfdb838f27b838c339fb2ee52e135fdd1eebca1fa57cf2e203',
+	'MSI' : '684a3cee13d1135778a951ad12e94cfb46a8e1a940d7a70879c4d2ad015ad725',
+	'OLCI': 'f5ce0ea3fec891325a3b2ce648607a54fbe7185211108dac138ecd6dcb568e88',
+	'OLI' : '1bac89926485e83eaeba287c9de3323ae8f8d294f976b23e6332edb67a23b17e',
+	'VI'  : '832abef1b7e6cdca7ce052d380d87123c898e791ea4f9427b5b7b6ab9d1e4943',
+}
 
 params = {
 	'MSI'   : ([443, 490, 560, 665, 705], 740),
@@ -41,7 +49,7 @@ def QAA_estimate(Rrs, band=660):
 # Define any optimizable parameters
 @optimize(['a', 'b', 'c', 'd', 'e', 'f'])
 def model(Rrs, wavelengths, sensor, *args, **kwargs):
-	sensor = sensor.replace('S2B','MSI')
+	sensor = sensor.replace('S2B','MSI').replace('MODA', 'MOD')
 	required, upper_band = params[sensor]
 
 	tol = kwargs.get('tol', 10) # allowable difference from the required wavelengths
@@ -60,13 +68,14 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 	type3 = (Rrs(660) > Rrs(485)).flatten()
 
 	mdn_kws = { 
-		'sensor'   : sensor.replace('S2B','MSI'),
-		'product'  : 'bb_p', 
-		'use_sim'  : True, 
-		'n_iter'   : 10000, 
-		'seed'     : 1234,
-		'silent'   : True, 
-		'model_loc': Path(__file__).parent.resolve().joinpath('MDN_Model').as_posix(), 
+		'sensor'    : sensor,
+		'product'   : 'bb_p', 
+		'use_sim'   : True, 
+		'n_iter'    : 10000, 
+		'seed'      : 1234,
+		'silent'    : True, 
+		'model_loc' : Path(__file__).parent.resolve().joinpath('MDN_Model').as_posix(),
+		'model_hash': model_hash[sensor],
 	}
 
 	estimate = np.empty(type1.shape)

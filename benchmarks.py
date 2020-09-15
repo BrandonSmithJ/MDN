@@ -1,5 +1,5 @@
 from .metrics      import performance
-from .utils        import find_wavelength
+from .utils        import find_wavelength, ignore_warnings
 from .meta         import get_sensor_bands
 from .transformers import TransformerPipeline, LogTransformer
 
@@ -11,7 +11,7 @@ import numpy as np
 import pkgutil, warnings, sys, os
 
 
-def get_methods(wavelengths, sensor, product, debug=True, allow_opt=False, **kwargs):
+def get_methods(wavelengths, sensor, product, debug=False, allow_opt=False, **kwargs):
 	''' Retrieve all benchmark functions from the appropriate product
 		directory. Import each function with "model" in the function
 		name, ensure any necessary parameters have a default value 
@@ -55,32 +55,39 @@ def get_methods(wavelengths, sensor, product, debug=True, allow_opt=False, **kwa
 	return methods
 
 
-def bench_product(args, sensor, x_test, y_test=None, slices=None, silent=True, product='chl', method=None):
-	assert(silent or y_test is not None), 'Must provide y values or set silent=True'
+@ignore_warnings
+def bench_product(sensor, X, y=None, bands=None, args=None, slices=None, silent=False, product='chl', method=None):	
+	if bands is None:
+		bands = get_sensor_bands(sensor, args)
+	assert(X.shape[1] == len(bands)), f'Too many features given as bands for {sensor}: {X.shape[1]} vs {len(bands)}'
 
-	waves = get_sensor_bands(sensor, args)
-	assert(x_test.shape[1] <= len(waves)), f'Too many features given as bands for {sensor}: {x_test.shape[1]} vs {len(waves)}'
-
-	methods = get_methods(waves, sensor, product, tol=15)
+	if product in ['a', 'aph', 'ap', 'ag', 'aph', 'adg', 'b', 'bbp']:
+		from .QAA import QAA
+		methods = {'QAA': lambda *args, **kwargs: QAA(*args)[product]}
+	
+		if product in ['a', 'aph', 'adg', 'b', 'bbp']:
+			from .GIOP.giop import GIOP
+			methods['GIOP'] = lambda *args, **kwargs: GIOP(*args, sensor=sensor)[product]
+	else:
+		methods = get_methods(bands, sensor, product, tol=15)
 	assert(method is None or method in methods), f'Unknown algorithm "{method}". Options are: \n{list(methods.keys())}'
 
 	ests = []
 	lbls = []
 	for name, func in methods.items():
 		if method is None or name == method:
-			est_val = func(x_test, waves, tol=15)
-			
+			est_val = func(X, bands, tol=15)
 			if product == 'chl':
-				est_val[~np.isfinite(est_val)] = 0
-				est_val[est_val < 0] = 0
+				# est_val[~np.isfinite(est_val)] = 0
+				est_val[est_val < 0] = np.nan#0
 
-			if not silent:
+			if not silent and y is not None:
 				curr_slice = slices
 				if slices is None:
-					assert(y_test.shape[1] == est_val.shape[1]), 'Ambiguous y data provided - need to give slices parameter.'
+					assert(y.shape[1] == est_val.shape[1]), 'Ambiguous y data provided - need to give slices parameter.'
 					curr_slice = {product:slice(None)}
 
-				ins_val = y_test[:, curr_slice[product]]
+				ins_val = y[:, curr_slice[product]]
 				for i in range(ins_val.shape[1]):
 					print( performance(name, ins_val[:, i], est_val) )
 			ests.append(est_val)
@@ -107,6 +114,7 @@ def bench_opt(args, sensor, x_train, x_test, y_train, y_test, slices, silent=Fal
 	return dict(zip(lbls, ests))
 
 
+@ignore_warnings
 def bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices=None, silent=False, product='chl', x_other=None, 
 			bagging=True, gridsearch=False, scale=True):
 	from sklearn.preprocessing import RobustScaler, QuantileTransformer, MinMaxScaler
@@ -129,7 +137,7 @@ def bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices=None, silent
 			}},
 		'SVM' : {
 			'class'   : svm.SVR,
-			'default' : {'C': 100.0, 'gamma': 'scale', 'kernel': 'rbf'},
+			'default' : {'C': 1e1, 'gamma': 'scale', 'kernel': 'rbf'},
 			'grid'    : {
 				'kernel' : ['rbf', 'poly'],
 				'gamma'  : ['auto', 'scale'],
@@ -137,7 +145,7 @@ def bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices=None, silent
 			}},
 		'MLP' : {
 			'class'   : neural_network.MLPRegressor,
-			'default' : {'alpha': 1e-05, 'hidden_layer_sizes': [100, 100, 100, 100], 'learning_rate': 'constant'},
+			'default' : {'alpha': 1e-05, 'hidden_layer_sizes': [100]*4, 'learning_rate': 'constant'},
 			'grid'    : {
 				'hidden_layer_sizes' : [[100]*i for i in range(1, 6)],
 				'alpha'              : [1e-5, 1e-4, 1e-3, 1e-2],
@@ -145,7 +153,7 @@ def bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices=None, silent
 			}},
 		'KNN' : {
 			'class'   : neighbors.KNeighborsRegressor,
-			'default' : {'n_neighbors': 5, 'p':1},
+			'default' : {'n_neighbors': 5, 'p': 1},
 			'grid'    : {
 				'n_neighbors' : [3, 5, 10, 20],
 				'p'           : [1, 2, 3],
@@ -188,45 +196,43 @@ def bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices=None, silent
 		assert(y_test.shape[1] == y_train.shape[1]), 'Ambiguous y data provided - need to give slices parameter.'
 		slices = {product:slice(None)}
 
-	with warnings.catch_warnings():
-		warnings.filterwarnings('ignore')
-		if gridsearch:
-			print('\nPerforming gridsearch...')
+	if gridsearch:
+		print('\nPerforming gridsearch...')
 
-		other = []
-		ests  = []
-		lbls  = []
-		for method, params in methods.items():
-			if gridsearch:
-				model = GridSearchCV(params['class'](), params['grid'], refit=False, n_jobs=3, scoring='neg_median_absolute_error')
-				model.fit(x_train.copy(), y_train.copy().flatten())
-
-				print(f'Best {method} params: {model.best_params_}')
-				model = params['class'](**model.best_params_)
-
-			else:
-				model = params['class'](**params['default'])
-
-			if bagging:
-				model = BaggingRegressor(model, n_estimators=10, max_samples=0.75, bootstrap=False)
+	other = []
+	ests  = []
+	lbls  = []
+	for method, params in methods.items():
+		if gridsearch and method != 'SVM':
+			model = GridSearchCV(params['class'](), params['grid'], refit=False, n_jobs=3, scoring='neg_median_absolute_error')
 			model.fit(x_train.copy(), y_train.copy().flatten())
-			est_val = model.predict(x_test.copy())
 
-			if scale:
-				est_val = y_scaler.inverse_transform(est_val[:,None]).flatten()	
+			print(f'Best {method} params: {model.best_params_}')
+			model = params['class'](**model.best_params_)
 
-			if not silent:
-				ins_val = y_test[:, slices[product]]
-				for i in range(ins_val.shape[1]):
-					print( performance(method, ins_val[:, i], est_val) )
+		else:
+			model = params['class'](**params['default'])
 
-			ests.append(est_val)
-			lbls.append(method)
+		if bagging:
+			model = BaggingRegressor(model, n_estimators=10, max_samples=0.75, bootstrap=False)
+		model.fit(x_train.copy(), y_train.copy().flatten())
+		est_val = model.predict(x_test.copy())
 
-			if x_other is not None:
-				est = model.predict(x_other.copy())
-				if scale: est = y_scaler.inverse_transform(est[:,None]).flatten()
-				other.append(est)
+		if scale:
+			est_val = y_scaler.inverse_transform(est_val[:,None]).flatten()	
+
+		if not silent:
+			ins_val = y_test[:, slices[product]]
+			for i in range(ins_val.shape[1]):
+				print( performance(method, ins_val[:, i], est_val) )
+
+		ests.append(est_val)
+		lbls.append(method)
+
+		if x_other is not None:
+			est = model.predict(x_other.copy())
+			if scale: est = y_scaler.inverse_transform(est[:,None]).flatten()
+			other.append(est)
 
 	if not len(other):
 		return dict(zip(lbls, ests))
@@ -312,11 +318,11 @@ def run_benchmarks(args, sensor, x_test, y_test, slices, silent=True, x_train=No
 	if len([k for k in slices if k[0] in ['a','b'] and '*' not in k and 'ad' not in k]):
 		benchmarks.update( bench_qaa(args, sensor, x_test, y_test, slices, silent) )
 
-		# if 'aph' in slices or 'apg' in slices:
-		# 	benchmarks.update( bench_giop(args, sensor, x_test, y_test, slices, silent) )
+		if 'aph' in slices or 'apg' in slices:
+			benchmarks.update( bench_giop(args, sensor, x_test, y_test, slices, silent) )
 
 	if 'chl' in slices:
-		benchmarks.update( bench_chl(args, sensor, x_test, y_test, slices, silent) )
+		benchmarks.update( bench_product(sensor, x_test, y=y_test, slices=slices, silent=silent, args=args, product='chl') )
 		# benchmarks.update( bench_giop(sensor, x_test, y_test, slices, silent) )
 		if with_ml:
 			benchmarks.update( bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices, silent, gridsearch=gridsearch) )
@@ -324,7 +330,7 @@ def run_benchmarks(args, sensor, x_test, y_test, slices, silent=True, x_train=No
 
 	if 'tss' in slices:
 		# benchmarks.update( bench_tss(args, sensor, x_test, y_test, slices, silent) )
-		benchmarks.update( bench_product(args, sensor, x_test, y_test, slices, silent, product='tss') )
+		benchmarks.update( bench_product(sensor, x_test, y=y_test, slices=slices, silent=silent, args=args, product='tss') )
 
 	return benchmarks
 

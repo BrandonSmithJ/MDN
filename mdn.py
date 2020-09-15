@@ -12,10 +12,10 @@ from tensorflow_probability import distributions as tfd
 from tensorflow.contrib.layers.python import layers as tf_layers
 from pathlib import Path 
 
-from .utils import read_pkl, store_pkl
+from .utils import read_pkl, store_pkl, ignore_warnings
 from .transformers import IdentityTransformer
 from .trainer import train_model
-
+from .mathops import erfinv # not available before TF 2.x
 
 class MDN(object):
 	''' Mixture Density Network which handles multi-output, full (symmetric) covariance.
@@ -34,7 +34,7 @@ class MDN(object):
 	l2 : float, optional (default=1e-3)
 		L2 regularization scale for the model weights.
 
-	n_iter : int, optional (default=1e5)
+	n_iter : int, optional (default=1e4)
 		Number of iterations to train the model for 
 
 	batch : int, optional (default=128)
@@ -102,11 +102,11 @@ class MDN(object):
 
 	'''
 
-	def __init__(self, n_mix=5, hidden=[100]*5, lr=1e-3, l2=1e-3, n_iter=1e5,
+	def __init__(self, n_mix=5, hidden=[100]*5, lr=1e-3, l2=1e-3, n_iter=1e4,
 				 batch=128, avg_est=False, imputations=5, epsilon=1e-3,
 				 threshold=None, independent_outputs=False, 
-				 scalerx=IdentityTransformer(), scalery=IdentityTransformer(), 
-				 model_path=Path('Model'), no_load=False, no_save=False,
+				 scalerx=None, scalery=None, 
+				 model_path=None, no_load=False, no_save=False,
 				 seed=None, verbose=False, debug=False, **kwargs):
 
 		self.n_mix        = n_mix
@@ -117,12 +117,12 @@ class MDN(object):
 		self.batch        = batch
 		self.avg_est      = avg_est
 		self.imputations  = imputations
-		self.eps          = epsilon
+		self.epsilon      = epsilon
 		self.threshold    = threshold
 		self.distribution = 'MultivariateNormalDiag' if independent_outputs else 'MultivariateNormalFullCovariance'
-		self.scalerx      = scalerx
-		self.scalery      = scalery
-		self.model_path   = model_path
+		self.scalerx      = scalerx if scalerx is not None else IdentityTransformer()
+		self.scalery      = scalery if scalery is not None else IdentityTransformer()
+		self.model_path   = model_path if model_path is not None else Path('Model')
 		self.no_load      = no_load 
 		self.no_save      = no_save
 		self.seed         = seed 
@@ -130,9 +130,10 @@ class MDN(object):
 		self.debug        = debug 
 
 		self.graph   = tf.Graph()
-		self.session = tf.compat.v1.Session(graph=self.graph)
+		self.session = tf.compat.v1.Session(graph=self.graph, config=tf.ConfigProto(device_count={'GPU':0}, log_device_placement=False))
 
 
+	@ignore_warnings
 	def fit(self, X, y, output_slices={'': slice(None)}, **kwargs):
 		with self.graph.as_default():
 			checkpoint = tf.train.latest_checkpoint(self.model_path)
@@ -144,18 +145,16 @@ class MDN(object):
 			elif self.no_load and X is None:
 				raise Exception('Model exists, but no_load is set and no training data was given.')
 
-			elif X is not None:
+			elif X is not None and y is not None:	
+				X = self.scalerx.fit_transform( self._ensure_format(X) )
+				y = self.scalery.fit_transform( self._ensure_format(y) )
+
 				self.output_slices = output_slices
-
-				with warnings.catch_warnings():
-					warnings.filterwarnings('ignore')
-					X = self.scalerx.fit_transform(X)
-					y = self.scalery.fit_transform(y)
-
 				self.n_in   = X.shape[1]
 				self.n_pred = y.shape[1] 
 				self.n_out  = self.n_mix * (1 + self.n_pred + (self.n_pred*(self.n_pred+1))//2) # prior, mu, (lower triangle) sigma
-		
+				# print(f'Training model with shapes X={X.shape} and ys={y.shape}')
+				
 				self.construct_model()
 				train_model(self, X, y, **kwargs)
 				self.save_model()
@@ -166,19 +165,46 @@ class MDN(object):
 		return self 
 
 
-	def predict(self, X):
+	@ignore_warnings
+	def predict(self, X, confidence_interval=None, threshold=None):
+		'''
+		confidence_interval : float, optional (default=None)
+			If a confidence interval value is given, then this function
+			returns (along with the predictions) the upper and lower 
+			{confidence_interval*100}% confidence bounds around the prediction.
+		
+		threshold : float, optional (default=None)
+			Override for the threshold value the MDN was initialized with.
+		'''
+		assert(confidence_interval is None or (0 < confidence_interval < 1)), 'confidence_interval must be in the range (0,1)'
+		assert(threshold is None or (0 < threshold <= 1)), 'threshold must be in the range (0,1]'
+
+		thresh = threshold or self.threshold
+		target = self.thresholded if thresh is not None else self.avg_estimate if self.avg_est else self.most_likely
+		inp_kw = {self.x: self.scalerx.transform(X), self.T: thresh}
+		
+		# Earlier model versions don't have any confidence interval attributes
+		if hasattr(self, 'C') and confidence_interval is not None: 
+			inp_kw[self.C] = confidence_interval
+			confid = self.avg_confidence if self.avg_est else self.top_confidence
+			target = [target, confid]
+		else: assert(confidence_interval is None), 'Model version does not allow confidence intervals'
+
 		with self.graph.as_default():
-			with warnings.catch_warnings():
-				warnings.filterwarnings('ignore')
-				target     = self.thresholded if self.threshold is not None else self.avg_estimate if self.avg_est else self.most_likely
-				prediction = self.session.run(target, feed_dict={self.x: self.scalerx.transform(X), self.T: self.threshold})
-				return self.scalery.inverse_transform(prediction)
+			output = self.session.run(target, feed_dict=inp_kw)
+			
+		if confidence_interval is not None: 
+			prediction, confidence = output 
+			upper_bar = prediction + confidence
+			lower_bar = prediction - confidence
+			return [self.scalery.inverse_transform(z) for z in [prediction, upper_bar, lower_bar]]
+		return self.scalery.inverse_transform(output)
 
 
 	def construct_model(self):
 		with self.graph.as_default():
 			self.random = np.random.RandomState(self.seed)
-			tf.compat.v1.set_random_seed(self.random.randint(1e10))
+			tf.compat.v1.set_random_seed(self.random.randint(1e10, dtype=np.int64))
 
 			self.global_step = tf.Variable(0, trainable=False, name='global_step')
 			self.is_training = tf.compat.v1.placeholder_with_default(False, [], name='is_training')
@@ -186,10 +212,10 @@ class MDN(object):
 			x = self.x = tf.compat.v1.placeholder(dtype=tf.float32, shape=[None, self.n_in],   name='x')
 			y = self.y = tf.compat.v1.placeholder(dtype=tf.float32, shape=[None, self.n_pred], name='y')	
 			T = self.T = tf.compat.v1.placeholder(dtype=tf.float32, shape=None, name='T') 
-			W = self.W = self.construct_weights()
-			estimate   = self.forward(x, W)
+			C = self.C = tf.compat.v1.placeholder(dtype=tf.float32, shape=None, name='C') 
+			estimate   = self.forward(x)
 
-			with tf.control_dependencies( self.debug_nan([estimate, x,]+[w[0] for mix_w in W for w in mix_w], names=['estim', 'x']+['w']*len([w[0] for mix_w in W for w in mix_w])) ):
+			with tf.control_dependencies( self._debug_nan([estimate, x], names=['estim', 'x']) ):
 				self.coefs = prior, mu, sigma = self.get_coefs(estimate)
 
 			dist = getattr(tfd, self.distribution)(mu, sigma)
@@ -214,7 +240,7 @@ class MDN(object):
 				train_op    = tf.compat.v1.train.AdamOptimizer(learn_rate)
 				grads, var  = zip(*train_op.compute_gradients(total_loss))
 
-				with tf.control_dependencies( self.debug_nan(list(grads) + [total_loss], names=[v.name.split(':')[0] for v in var]+['loss']) ):
+				with tf.control_dependencies( self._debug_nan(list(grads) + [total_loss], names=[v.name.split(':')[0] for v in var]+['loss']) ):
 					self.train = train_op.apply_gradients(zip(grads, var), global_step=self.global_step, name='train_op')
 					self.loss  = tf.identity(total_loss, name='model_loss')
 
@@ -225,7 +251,7 @@ class MDN(object):
 	def get_coefs(self, output):
 		prior, mu, sigma = tf.split(output, [self.n_mix, self.n_mix*self.n_pred, -1], axis=1)
 
-		with tf.control_dependencies( self.debug_nan([prior, mu, sigma], names=['prior', 'mu', 'sigma']) ):
+		with tf.control_dependencies( self._debug_nan([prior, mu, sigma], names=['prior', 'mu', 'sigma']) ):
 			prior = tf.nn.softmax(prior, axis=-1) + 1e-9
 
 			# Reshape tensors so that elements remain in the correct locations
@@ -250,7 +276,7 @@ class MDN(object):
 
 			# Minimum uncertainty on covariance diagonal - prevents 
 			# matrix inversion errors, and regularizes the model
-			sigma+= self.eps * norm
+			sigma += self.epsilon * norm
 
 
 			# _,var = tf.nn.moments(tf.stop_gradient(mu), [0])
@@ -271,6 +297,19 @@ class MDN(object):
 			self.avg_estimate = tf.identity(tf.reduce_sum(mu * tf.expand_dims(prior, -1), 1), name='avg_estimate') 
 			self.thresholded  = tf.identity(tf.compat.v2.where(tf.expand_dims(tf.math.greater(tf.reduce_max(prior, 1) / self.T, tf.math.sign(self.T)), -1), self.most_likely, self.avg_estimate), name='thresholded')
 			
+			# For a given confidence level probability p (0<p<1), and number of dimensions d, rho is the error bar coefficient: rho=sqrt(2)*erfinv(p ** (1/d))
+			# https://faculty.ucmerced.edu/mcarreira-perpinan/papers/cs-99-03.pdf
+			top_sigma = self.get_top(prior, sigma)
+			avg_sigma = tf.reduce_sum(tf.expand_dims(tf.expand_dims(prior, -1), -1) * 
+							(sigma + tf.matmul(tf.transpose(mu - tf.expand_dims(self.avg_estimate, 1), (0,2,1)), 
+															mu - tf.expand_dims(self.avg_estimate, 1))), axis=1)
+
+			s_top, u_top, v_top = tf.linalg.svd(top_sigma)
+			s_avg, u_avg, v_avg = tf.linalg.svd(avg_sigma)
+			
+			rho = 2**0.5 * erfinv(self.C ** (1./self.n_pred)) 
+			self.top_confidence = tf.identity(rho * 2 * s_top ** 0.5, name='top_confidence') # confidence interval centered on top mu
+			self.avg_confidence = tf.identity(rho * 2 * s_avg ** 0.5, name='avg_confidence') # confidence interval centered on avg mu
 			return prior, mu, sigma
 
 
@@ -278,18 +317,25 @@ class MDN(object):
 		self.saver = tf.train.import_meta_graph(checkpoint + '.meta')
 		self.saver.restore(self.session, checkpoint)
 		
-		self.x     = self.graph.get_tensor_by_name('x:0') 
-		self.y     = self.graph.get_tensor_by_name('y:0') 
-		self.T     = self.graph.get_tensor_by_name('T:0') 
-		self.loss  = self.graph.get_tensor_by_name('model_loss:0')
-		self.train = self.graph.get_operation_by_name('train_op')
-		self.coefs = [self.graph.get_tensor_by_name('%s:0' % v) for v in ['prior', 'mu', 'sigma']] 
-		self.avg_estimate = self.graph.get_tensor_by_name('avg_estimate:0')
-		self.most_likely  = self.graph.get_tensor_by_name('most_likely:0')
-		self.thresholded  = self.graph.get_tensor_by_name('thresholded:0')
-		self.is_training  = self.graph.get_tensor_by_name('is_training:0')
-		self.global_step  = self.graph.get_tensor_by_name('global_step:0')
+		self.x = self.graph.get_tensor_by_name('x:0') 
+		self.y = self.graph.get_tensor_by_name('y:0') 
+		self.most_likely = self.graph.get_tensor_by_name('most_likely:0')
 
+		try:
+			self.T     = self.graph.get_tensor_by_name('T:0') 
+			self.C     = self.graph.get_tensor_by_name('C:0') 
+			self.loss  = self.graph.get_tensor_by_name('model_loss:0')
+			self.train = self.graph.get_operation_by_name('train_op')
+			self.coefs = [self.graph.get_tensor_by_name('%s:0' % v) for v in ['prior', 'mu', 'sigma']] 
+			self.avg_estimate = self.graph.get_tensor_by_name('avg_estimate:0')
+			self.thresholded  = self.graph.get_tensor_by_name('thresholded:0')
+			self.is_training  = self.graph.get_tensor_by_name('is_training:0')
+			self.global_step  = self.graph.get_tensor_by_name('global_step:0')
+			self.top_confidence = self.graph.get_tensor_by_name('top_confidence:0')
+			self.avg_confidence = self.graph.get_tensor_by_name('avg_confidence:0')
+		except:
+			if self.verbose:
+				print('WARNING: Could not fetch all graph variables, likely due to this model being an old version.')
 		self.scalerx, self.scalery, self.output_slices, self.random = read_pkl(self.model_path.joinpath('scaler.pkl'))
 
 
@@ -311,8 +357,10 @@ class MDN(object):
 		return [create_Wb(in_size, out_size, i)	for i, (in_size, out_size) in enumerate(zip(in_sizes, out_sizes))]
 		
 
-	def forward(self, inp, weights, funcs=[tf.nn.relu]):
-		with tf.control_dependencies( self.debug_nan([inp], names=['input']) ):
+	def forward(self, inp, funcs=[tf.nn.relu]):
+		weights = self.construct_weights()
+		with tf.control_dependencies( self._debug_nan([inp]+[w[0] for mix_w in weights for w in mix_w], 
+							names=['input']+['w']*len([w[0] for mix_w in weights for w in mix_w])) ):
 			for i, (W, b) in enumerate(weights):
 				if i: 
 					for f in funcs: 
@@ -323,16 +371,22 @@ class MDN(object):
 
 	def get_top(self, prior, values):
 		''' Return values for the distribution with the most likely prior '''
-		with tf.control_dependencies( self.debug_nan([prior, values], names=['prior', 'values']) ):
+		with tf.control_dependencies( self._debug_nan([prior, values], names=['prior', 'values']) ):
 			vals, idxs  = tf.nn.top_k(prior, k=1)
 			idxs = tf.stack([tf.range(tf.shape(idxs)[0]), tf.reshape(idxs, [-1])], axis=-1)
 			return tf.gather_nd(values, idxs)
 
 
-	def debug_nan(self, mats, names=[]):
+	def _debug_nan(self, mats, names=[]):
 		''' Create assertion dependencies for all given matrices, that all values are finite '''
 		dependencies = []
 		if self.debug:
 			for i,mat in enumerate(mats):
 				dependencies.append(tf.Assert(tf.reduce_all(tf.math.is_finite(mat)), [mat], name=names[i] if len(names) > i else '', summarize=1000))
 		return dependencies
+
+
+	def _ensure_format(self, z):
+		''' Ensure passed matrix has two dimensions [n_sample, n_feature], and add the n_feature axis if not '''
+		z = np.array(z).copy()
+		return z[:, None] if len(z.shape) == 1 else z
