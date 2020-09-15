@@ -1,15 +1,7 @@
-import numpy as np 
-import pickle as pkl 
-import argparse
-import sys
-import warnings
-import hashlib
-
-from collections import defaultdict as dd
 from pathlib import Path
 from sklearn import preprocessing
-from glob  import glob 
-from tqdm  import trange, tqdm 
+from tqdm  import trange 
+import numpy as np 
 
 from .mdn   import MDN
 from .meta  import get_sensor_bands, SENSOR_LABEL, ANCILLARY, PERIODIC
@@ -219,7 +211,6 @@ def main():
 		data_full = np.append(np.append(locs, x_data, 1), y_data, 1)
 		data_full = np.append([['index', 'dataset']+wvls+lbls], data_full, 0)
 		np.savetxt(f'{args.sensor}_data_full.csv', data_full, delimiter=',', fmt='%s')
-
 
 	# Train a model with partial data, and benchmark on remaining
 	elif args.benchmark:
