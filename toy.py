@@ -7,11 +7,11 @@ import matplotlib.ticker as ticker
 from matplotlib.patches import Ellipse
 from matplotlib.colors import LogNorm
 
-from .utils import add_stats_box, add_identity
+from .plot_utils import add_stats_box, add_identity
 from .benchmarks import bench_ml 
 from .parameters import get_args 
 from .metrics import mae, mape, rmsle, slope, msa, sspb
-from .mdn import MDN 
+from .mdn2 import MDN 
 
 import numpy as np 
 import seaborn as sns
@@ -23,42 +23,22 @@ N_TEST   = 20
 N_SAMPLE = N_TRAIN + N_VALID + N_TEST
 
 
-def get_data(dep_noise_pct, ind_noise_pct):
-	def wave_function(y):
-		# x = 7 * np.sin(2 * np.sin(0.75 * y) + y / 2)
-		return 2 * np.sin(.75 * y) + y / 2
-
-	# Generate data
-	y_data = np.random.uniform(-10, 10, (N_SAMPLE, 1))
-	x_data = wave_function(y_data)
-
-	# Sort by x
-	x_data, y_data = zip(*sorted(zip(x_data, y_data), key=lambda k: k[0]))
-	x_data = np.array(x_data)
-	y_data = np.array(y_data)
-
-	# Store data without noise
-	x_orig = x_data.copy()
-	y_orig = y_data.copy()
+def add_noise(x_data, y_data, x_dep, x_ind, y_dep=None, y_ind=None):
+	if y_dep is None: y_dep = x_dep
+	if y_ind is None: y_ind = x_ind 
 
 	# Generate noise
-	x_dep_noise = dep_noise_pct * np.random.normal(size=x_data.shape) * x_data
-	y_dep_noise = dep_noise_pct * np.random.normal(size=y_data.shape) * y_data
-	x_ind_noise = ind_noise_pct * np.random.normal(size=x_data.shape) * np.abs(x_data).mean()
-	y_ind_noise = ind_noise_pct * np.random.normal(size=y_data.shape) * np.abs(y_data).mean()
+	x_dep_noise = x_dep * np.random.normal(size=x_data.shape) * x_data
+	y_dep_noise = y_dep * np.random.normal(size=y_data.shape) * y_data
+	x_ind_noise = x_ind * np.random.normal(size=x_data.shape) * np.abs(x_data).mean()
+	y_ind_noise = y_ind * np.random.normal(size=y_data.shape) * np.abs(y_data).mean()
+	return x_data+x_dep_noise+x_ind_noise, y_data+y_dep_noise+y_ind_noise
 
-	# Add noise
-	# v = x_dep_noise + x_ind_noise 
-	v = 0.05 * np.random.normal(size=x_data.shape) * x_data
-	x_data += v
-	x_orig += v
-	y_data += y_dep_noise + y_ind_noise
-	# y_data += 0.05 * np.random.normal(size=y_data.shape) * np.abs(y_data).mean()
-	# x_orig += x_dep_noise + x_ind_noise
 
+def split_and_process(x_data, y_data, x_orig, y_orig, n_train, n_test, scale=True):
 	# Gather test, evenly across x space
-	i_test = np.linspace(0, len(x_data)-1, N_TEST).astype(int)
-	i_test = np.isin(np.arange(len(x_data)), i_test).astype(np.bool)
+	i_test = np.linspace(0, len(x_data)-1, n_test).astype(int)
+	i_test = np.isin(np.arange(len(x_data)), i_test).astype(bool)
 	x_test = x_data[i_test]
 	y_test = y_data[i_test]
 
@@ -71,50 +51,78 @@ def get_data(dep_noise_pct, ind_noise_pct):
 	x_orig = x_orig[~i_test][i_data]
 	y_orig = y_orig[~i_test][i_data]
 
-	x_train = x_data[:N_TRAIN]
-	y_train = y_data[:N_TRAIN]
-	x_valid = x_data[N_TRAIN:]
-	y_valid = y_data[N_TRAIN:]
-	x_orig  = x_orig[N_TRAIN:]
-	y_orig  = y_orig[N_TRAIN:]
+	x_train = x_data[:n_train]
+	y_train = y_data[:n_train]
+	x_valid = x_data[n_train:]
+	y_valid = y_data[n_train:]
+	x_orig  = x_orig[n_train:]
+	y_orig  = y_orig[n_train:]
 
 	# Scale data
-	sx = RobustScaler()
-	sy = RobustScaler()
-	sx.fit(x_train)
-	sy.fit(y_train)
+	if scale:
+		sx = RobustScaler()
+		sy = RobustScaler()
+		sx.fit(x_train)
+		sy.fit(y_train)
 
-	x_train = sx.transform(x_train)
-	y_train = sy.transform(y_train)
-	x_valid = sx.transform(x_valid)
-	y_valid = sy.transform(y_valid)
-	x_test  = sx.transform(x_test)
-	y_test  = sy.transform(y_test)
-	x_orig  = sx.transform(x_orig)
-	y_orig  = sy.transform(y_orig)
+		x_train = sx.transform(x_train)
+		y_train = sy.transform(y_train)
+		x_valid = sx.transform(x_valid)
+		y_valid = sy.transform(y_valid)
+		x_test  = sx.transform(x_test)
+		y_test  = sy.transform(y_test)
+		x_orig  = sx.transform(x_orig)
+		y_orig  = sy.transform(y_orig)
+	return x_train, y_train, x_valid, y_valid, x_test, y_test, x_orig, y_orig
+
+
+def get_data(dep_noise_pct, ind_noise_pct, minor_x=False, minor_y=False):
+	def wave_function(y):
+		# x = 7 * np.sin(2 * np.sin(0.75 * y) + y / 2)
+		return 7 * np.sin(.75 * y) + y / 2
+
+	# Generate data
+	y_orig = np.random.uniform(-10, 10, (N_SAMPLE, 1))
+	x_orig = wave_function(y_orig)
 
 	# Sort by x
-	x_data, y_data = zip(*sorted(zip(x_data, y_data), key=lambda k: k[0]))
-	x_data = np.array(x_data)
-	y_data = np.array(y_data)
+	x_orig, y_orig = map(np.array, zip(*sorted(zip(x_orig, y_orig), key=lambda k: k[0])))
 
-	x_orig, y_orig = zip(*sorted(zip(x_orig, y_orig), key=lambda k: k[0]))
-	x_orig = np.array(x_orig)
-	y_orig = np.array(y_orig)
+	# Determine noise levels
+	x_dep = y_dep = dep_noise_pct
+	x_ind = y_ind = ind_noise_pct
+
+	# If minor x noise: 5% dependent, 0% independent
+	if minor_x:
+		x_dep = 0.05
+		x_ind = 0
+
+	# If minor x noise: 0% dependent, 5% independent
+	if minor_y:
+		y_dep = 0
+		y_ind = 0.05
+	
+	# Add noise
+	x_data, y_data = add_noise(x_orig.copy(), y_orig.copy(), x_dep, x_ind, y_dep, y_ind)
+	x_orig = x_data # X noise is always present
+
+	x_train, y_train, x_valid, y_valid, x_test, y_test, x_orig, y_orig = \
+		split_and_process(x_data, y_data, x_orig, y_orig, N_TRAIN, N_TEST)
+
+	# Sort by x
+	x_data, y_data = map(np.array, zip(*sorted(zip(x_data, y_data), key=lambda k: k[0])))
+	x_orig, y_orig = map(np.array, zip(*sorted(zip(x_orig, y_orig), key=lambda k: k[0])))
 	return x_train, y_train, x_valid, y_valid, x_test, y_test, x_orig, y_orig
 
 
 
 if __name__ == '__main__':
-# 	from .Development.mdn_sia import MDN 
-# 	from sklearn.cluster import MiniBatchKMeans
 
 	kwargs = {
 		# 'n_mix'      : 10,
 		# 'n_layers'   : 5,
 		# 'n_hidden'   : 200,
 		'n_iter'     : 10000,
-		'no_bagging' : True,
 		'n_redraws'  : 50,
 		# 'batch': 256,
 		# 'l2': 1e-5,
@@ -127,15 +135,15 @@ if __name__ == '__main__':
 	kwargs['hidden'] = [kwargs['n_hidden']] * kwargs['n_layers']
 
 	# Plot training progress
-	if False:
-		dep_noise_pct = 0.2
-		ind_noise_pct = 0.2
+	if True:
+		dep_noise_pct = 0.01
+		ind_noise_pct = 0.01
 
 		x_train, y_train, x_valid, y_valid, x_test, y_test, x_nonoise, y_nonoise = get_data(dep_noise_pct, ind_noise_pct)
 
 		xmin, xmax = x_train.min()-abs(x_train.min()*0.1), x_train.max()*1.1
 		ymin, ymax = y_train.min()-abs(y_train.min()*0.1), y_train.max()*1.1
-
+		print(xmin, xmax, ymin, ymax)
 		if 0:
 			plt.plot(x_valid, y_valid, 'kx')
 			plt.xlim((xmin, xmax))
@@ -213,9 +221,6 @@ if __name__ == '__main__':
 		model.n_out  = model.n_mix * (1 + model.n_pred + (model.n_pred*(model.n_pred+1))//2) # prior, mu, (lower triangle) sigma
 		model.construct_model()	
 
-		clusters = MiniBatchKMeans(n_clusters=model.n_mix).fit_predict(RobustScaler().fit_transform(np.append(x_train, y_train, 1)))
-		clusters = np.random.randint(0, 4, len(clusters))#np.zeros_like(clusters)
-
 		likelihoods = np.zeros(len(x_train)) + 0.01
 		picked = np.zeros(len(x_train))
 		full_idxs = indices.copy()
@@ -238,8 +243,7 @@ if __name__ == '__main__':
 			# 				feed_dict={model.x: x_train[idx], model.y: y_train[idx], model.is_training: True})
 			# model = train_mdn(model, x_train, y_train)
 
-			_, c, new_cl = model.session.run([model.train, model.coefs, model.new_clust], feed_dict={model.x: x_train[idx], model.y: y_train[idx], model.is_training: True, model.c: clusters[idx]})
-			clusters[idx] = new_cl
+			_, c = model.session.run([model.train, model.coefs], feed_dict={model.x: x_train[idx], model.y: y_train[idx], model.is_training: True})
 
 			# likelihoods[idx] = np.max(c[0], 1)
 			# picked[idx] += 1
@@ -293,7 +297,7 @@ if __name__ == '__main__':
 				# ax2.set_ylim((ymin, ymax))
 				# ax2.plot(x_train, y_train, 'kx', zorder=1)
 				# ax2.plot(x_test, mean, 'r.', zorder=15)
-				m_valid = model.session.run(model.most_likely, feed_dict={model.x: x_valid})
+				m_valid, valid_coef = model.session.run([model.most_likely, model.coefs], feed_dict={model.x: x_valid})
 
 				# m_valid = MDN.get_most_likely_estimates( predict(model, x_valid) )
 
@@ -317,13 +321,107 @@ if __name__ == '__main__':
 				ax.set_xlim((xmin, xmax))
 				ax.set_ylim((ymin, ymax))
 
-				# ax.plot(x_train, y_train, 'kx', zorder=1)
-				ax.scatter(x_train.flatten(), y_train.flatten(), c=clusters/(clusters.max()+1), marker='x', alpha=0.5, zorder=1)
+				ax.plot(x_train, y_train, 'kx', zorder=1)
+				# ax.scatter(x_train.flatten(), y_train.flatten(), c=clusters/(clusters.max()+1), marker='x', alpha=0.5, zorder=1)
 
 				top = prior == prior.max(1, keepdims=True)
 				top[top.sum(1) > 1] = np.eye(top.shape[1])[np.random.randint(top.shape[1])].astype(np.bool)
 				ax.plot(x_test, mu[top], 'r.', zorder=15)
 
+				# def pdf(x, prior, mu, sigma):
+				# 	val = 1
+				# 	for m in range(prior.shape[1]):
+				# 		mix_mu = mu[:, m]
+				# 		mix_si = sigma[:, m]
+
+				# 		k = mu.shape[1]
+				# 		coef = ((2*np.pi)**k * np.det(mix_si)) ** -0.5
+				valid_coef = model.session.run(model.coefs, feed_dict={model.x: x_train})
+
+				valid_prior, valid_mu, valid_si = valid_coef
+				valid_top = valid_prior.argmax(axis=1)
+
+				# top_mu = valid_mu[np.arange(valid_mu.shape[0]), valid_top].flatten()
+				# top_si = valid_si[np.arange(valid_mu.shape[0]), valid_top].flatten()
+
+				# x, y, s = map(np.array, zip(*sorted(zip(x_valid.flatten(), top_mu, top_si), key=lambda z:z[1])))
+				# print(x_valid[0].flatten(), top_mu[0], top_si[0])
+				# s = 5 * s ** 2
+				# ax.plot(x, y+s, color='g')
+				# ax.plot(x, y, color='r')
+				# ax.plot(x, y-s, color='g')
+
+
+				def hessian(x):
+					"""
+					Calculate the hessian matrix with finite differences
+					Parameters:
+					   - x : ndarray
+					Returns:
+					   an array of shape (x.dim, x.ndim) + x.shape
+					   where the array[i, j, ...] corresponds to the second derivative x_ij
+					"""
+					x_grad = np.gradient(x) 
+					hessian = np.empty((x.ndim, x.ndim) + x.shape, dtype=x.dtype) 
+					for k, grad_k in enumerate(x_grad):
+						# iterate over dimensions
+						# apply gradient again to every component of the first derivative.
+						tmp_grad = np.gradient(grad_k) 
+						for l, grad_kl in enumerate(tmp_grad):
+							hessian[k, l, :, :] = grad_kl
+					return hessian
+
+				top_mu = valid_mu[np.arange(valid_mu.shape[0]), valid_top].flatten()
+				top_si = valid_si[np.arange(valid_mu.shape[0]), valid_top]
+
+				# We use the mixture mode as the mean, and calculate the resulting mixture covariance
+				# print(np.transpose(valid_mu - top_mu[:,None,None], (0,2,1)).shape)
+				# print(np.matmul(np.transpose(valid_mu - top_mu[:,None,None], (0,2,1)), valid_mu - top_mu[:,None, None]).shape)
+				mixture_cov = valid_prior[..., None, None] * (valid_si + np.matmul(np.transpose(valid_mu - top_mu[:,None,None], (0,2,1)), valid_mu - top_mu[:,None, None])[:, None, ...])
+				mixture_cov = mixture_cov.sum(axis=1)
+
+				mixture_cov = top_si
+
+				# print(mixture_cov.shape)
+				# print(mixture_cov[0])
+				# print()
+				u, s, _ = np.linalg.svd(mixture_cov, hermitian=True)
+				print(u.flatten())
+				# print(u.shape, s.shape)
+				# print(np.matmul(np.matmul(u, s[...,None]), np.transpose(u, (0,2,1)))[0])
+				from scipy.special import erfinv
+
+				# https://faculty.ucmerced.edu/mcarreira-perpinan/papers/cs-99-03.pdf
+				# For a confidence level given by probability p (0<p<1) and number of dimensions d, rho is the error bar coefficient
+				conf = 0.95#np.logspace(-1, 0, 30) - 1e-4 # 0.99
+				# print(conf.min(), conf.max())
+				rho = lambda p, d=1: 2 ** 0.5 * erfinv(p ** (1/d)) 
+
+				# conf_surf = np.zeros((len(valid_si), len(conf)))
+				# for ind in valid_prior.shape[1]:
+				u, s, _ = np.linalg.svd(valid_si[:,ind], hermitian=True)
+				bar = 2 * rho(conf) * s ** 0.5 # error bars centered at the mixture mode
+					
+					# conf_surf += bar * valid_prior[:, ind] 
+
+				# print(bar.flatten())
+				# print(bar.shape)
+				# assert(0)
+
+				x, y = map(np.array, zip(*sorted(zip(x_train.flatten(), top_mu), key=lambda z:z[1])))
+				x2, y2 = map(np.array, zip(*sorted(zip(x_train.flatten(), top_mu+bar.flatten()), key=lambda z:z[1])))
+				x3, y3 = map(np.array, zip(*sorted(zip(x_train.flatten(), top_mu-bar.flatten()), key=lambda z:z[1])))
+				# print(list(zip(np.round(x,2), np.round(y,2))))
+				# print(list(zip(np.round(x2,2), np.round(y2,2))))
+				# print(list(zip(np.round(x3,2), np.round(y3,2))))
+
+				ax.scatter(x2, y2, color='g', zorder=100)
+				ax.scatter(x, y, color='r', zorder=100)
+				ax.scatter(x3, y3, color='y', zorder=100)
+
+
+				# assert(0)
+				# ax.plot(x_valid, valid_coef[])
 				for i,m in enumerate(mu[top]):
 
 					circle = Ellipse((x_test[i], m), 0.25, sigma[top][i].flatten())#*np.diag(sigma[i,0]))
@@ -379,16 +477,16 @@ if __name__ == '__main__':
 					# ax.plot(*y_data.T, 'kx')
 					ax3.plot(x_nonoise, y_nonoise, 'kx', zorder=1)
 					# ax.plot(*mu[:,0].T, 'r.')
-					ax3.scatter(x_nonoise.flatten(), likely.flatten(), c=np.argmax(prior, 1).flatten()/prior.shape[1], marker='^', cmap='jet', zorder=15, alpha=0.2)
+					ax3.scatter(x_nonoise.flatten(), likely.flatten(), c=np.argmax(prior, 1).flatten()/prior.shape[1], marker='^', cmap='coolwarm', zorder=15, alpha=0.2)
 					# print('diff:', np.abs(likely.flatten() - model.get_most_likely_estimates([prior, mu, sigma]).flatten()).sum())
 					# ax3.scatter(x_nonoise.flatten(), model.get_most_likely_estimates([prior, mu, sigma]).flatten(), c=np.argmax(prior, 1).flatten()/prior.shape[1], cmap='jet', zorder=15, alpha=0.2)
 					for m in range(mu.shape[1]):
 						ax3.scatter(x_nonoise.flatten(), mu[:,m].flatten(), alpha=0.01)
-					ax3.scatter(x_nonoise.flatten(), np.sum(mu[...,0] * prior, 1).flatten())
+					# ax3.scatter(x_nonoise.flatten(), np.sum(mu[...,0] * prior, 1).flatten())
 
 					IDX   = 0
 					sigma = sigma[..., IDX, IDX][None, ...] if len(sigma.shape) == 4 else sigma[..., IDX][None, ...]
-					sigma = np.ones_like(sigma) * 1e-1
+					sigma = np.ones_like(sigma) * 0.5
 					mu    = mu[..., IDX][None, ...]
 					prior = prior[None, ...]
 					Y   = np.linspace(y_nonoise.min() * 1.5, y_nonoise.max()*1.5, 1000)[::-1, None, None]
@@ -407,7 +505,7 @@ if __name__ == '__main__':
 
 
 				plt.pause(1e-9)
-
+				# input('?')
 
 		input('finish?')
 		print('True locs:', y_train[idx][:5])
@@ -438,8 +536,8 @@ if __name__ == '__main__':
 
 	else:
 		metrics = [(m, m.__name__.replace('MSA', 'Error').replace('SSPB','Bias')) for m in [msa, sspb]]
-		# metrics[1] = (lambda *args, **kwargs: np.abs(sspb(*args, **kwargs)), '|Bias|')
-		n_trials= 10
+		metrics[1] = (lambda *args, **kwargs: np.abs(sspb(*args, **kwargs)), '|Bias|')
+		n_trials= 20
 
 		n_rows = 2
 		n_cols = len(metrics) + 1
@@ -455,7 +553,7 @@ if __name__ == '__main__':
 			# 'n_mix'      : 10,
 			# 'n_layers'   : 5,
 			# 'n_hidden'   : 200,
-			'n_iter'     : 100000,
+			'n_iter'     : 10000,
 			'no_bagging' : True,
 			# 'n_redraws'  : 50,
 			# 'batch': 256,
@@ -519,14 +617,16 @@ if __name__ == '__main__':
 					for i, (metric, name) in enumerate(metrics, 1):
 						axes[0][i].set_title(name, fontsize=18)
 						axes[1][i].set_xlabel('Noise', fontsize=18)
+						axes[0][i].set_xticklabels([])
 						axes[0][i].yaxis.set_major_formatter(ticker.PercentFormatter(decimals=0))
 						axes[1][i].yaxis.set_major_formatter(ticker.PercentFormatter(decimals=0))
+						axes[1][i].xaxis.set_major_formatter(ticker.PercentFormatter(1, decimals=0))
 					axes[0][0].set_ylabel(f'Validation With {ind_noise_pct*100:.0f}% Noise', fontsize=18)
 					axes[1][0].set_ylabel('Validation Without Noise', fontsize=18)
 					
-					axes[0][0].scatter(x_train, y_train, label='train')
+					# axes[0][0].scatter(x_train, y_train, label='train')
 					axes[0][0].scatter(x_valid, y_valid, label='valid')
-					axes[0][0].legend()
+					# axes[0][0].legend()
 					axes[1][0].scatter(x_nonoise, y_nonoise)
 
 					for method, estimates in benchmarks_noise.items():

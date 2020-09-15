@@ -1,243 +1,212 @@
+from .utils import ignore_warnings
 from scipy import stats
 import numpy as np 
 import functools 
-import warnings 
 
-def flatten(func):
-	''' Decorator to flatten function parameters '''
+
+def validate_shape(func):
+	''' Decorator to flatten all function input arrays, and ensure shapes are the same '''
 	@functools.wraps(func)
 	def helper(*args, **kwargs):
-		flat_args = [a if a is None else a.flatten() for a in args]
+		flat_args = [a.flatten() if hasattr(a, 'flatten') else a for a in args]
+		shapes    = [a.shape for a in flat_args if hasattr(a, 'shape')]
+		original  = [a.shape for a in args      if hasattr(a, 'shape')]
+		assert(all(shapes[0] == s for s in shapes)), f'Shapes mismatch in {func.__name__}: {original}'
 		return func(*flat_args, **kwargs)
-	return helper 
+	return helper  
 
 
-def only_valid(func):
-	''' Decorator to remove all elements having a nan in any array '''
+def only_finite(func):
+	''' Decorator to remove samples which are nan in any input array '''
+	@validate_shape
 	@functools.wraps(func)
 	def helper(*args, **kwargs):
-		assert(all([len(a.shape) == 1 for a in args]))
 		stacked = np.vstack(args)
 		valid   = np.all(np.isfinite(stacked), 0)
+		assert(valid.sum()), f'No valid samples exist for {func.__name__} metric'
 		return func(*stacked[:, valid], **kwargs)
 	return helper 
 
 
 def only_positive(func):
-	''' Decorator to remove all elements having a zero/negative value in any array '''
-	@functools.wraps(func)
+	''' Decorator to remove samples which are zero/negative in any input array '''
+	@validate_shape
+	@functools.wraps(func)	
 	def helper(*args, **kwargs):
-		assert(all([len(a.shape) == 1 for a in args]))
 		stacked = np.vstack(args)
 		valid   = np.all(stacked > 0, 0)
+		assert(valid.sum()), f'No valid samples exist for {func.__name__} metric'
 		return func(*stacked[:, valid], **kwargs)
 	return helper 
 
 
 def label(name):
-	''' Label a function for when it's printed '''
-	def helper(f):
-		f.__name__ = name
-		return f
-	return helper
+	''' Label a function to aid in printing '''
+	def wrapper(func):
+		func.__name__ = name
+		return ignore_warnings(func)
+	return wrapper
 
 
+# ============================================================================
+''' 
+When executing a function, decorator order starts with the 
+outermost decorator and works its way down the stack; e.g.
+	@dec1
+	@dec2
+	def foo(): pass 
+	def bar(): pass
+And then foo == dec1(dec2(bar)). So, foo will execute dec1, 
+then dec2, then the original function. 
+
+Below, in rmsle (for example), we have:
+	rmsle = only_finite( only_positive( label(rmsle) ) ) 
+This means only_positive() will get the input arrays only
+after only_finite() removes any nan samples. As well, both
+only_positive() and only_finite() will have access to the 
+function __name__ assigned by label().
+
+For all functions below, y=true and y_hat=estimate
+'''
+
+
+@only_finite
 @label('RMSE')
-@flatten
-@only_valid
-def rmse(y1, y2):
+def rmse(y, y_hat):
 	''' Root Mean Squared Error '''
-	# return ((y1 - y2) ** 2).mean() ** .5
-	return np.mean((y1 - y2) ** 2) ** .5
+	return np.mean((y - y_hat) ** 2) ** .5
 
 
+@only_finite
+@only_positive
 @label('RMSLE')
-@flatten
-@only_valid
-@only_positive
-def rmsle(y1, y2):
+def rmsle(y, y_hat):
 	''' Root Mean Squared Logarithmic Error '''
-	return np.mean(np.abs(np.log(y1) - np.log(y2)) ** 2) ** 0.5 
+	return np.mean(np.abs(np.log(y) - np.log(y_hat)) ** 2) ** 0.5 
 
 
+@only_finite
 @label('NRMSE')
-@flatten
-@only_valid
-def nrmse(y1, y2):
+def nrmse(y, y_hat):
 	''' Normalized Root Mean Squared Error '''
-	return ((y1 - y2) ** 2).mean() ** .5 / y1.mean()
+	return ((y - y_hat) ** 2).mean() ** .5 / y.mean()
 
 
+@only_finite
 @label('MAE')
-@flatten
-@only_valid
-def mae(y1, y2):
+def mae(y, y_hat):
 	''' Mean Absolute Error '''
-	return np.mean(np.abs(y1 - y2))
+	return np.mean(np.abs(y - y_hat))
 
 
-# @label('MAE')
-# @flatten
-# @only_valid
-# def mae(y1, y2):
-# 	''' Mean Absolute Error '''
-# 	i  = np.logical_and(y1 > 0, y2 > 0)
-# 	y1 = np.log10(y1[i])
-# 	y2 = np.log10(y2[i])
-# 	i  = np.logical_and(np.isfinite(y1), np.isfinite(y2))
-# 	y1 = y1[i]
-# 	y2 = y2[i]
-# 	return 10**np.median(np.abs(y1 - y2))
-
-
+@only_finite
 @label('MAPE')
-@flatten
-@only_valid
-def mape(y1, y2):
+def mape(y, y_hat):
 	''' Mean Absolute Percentage Error '''
-	return 100 * np.median(np.abs((y1 - y2) / y1))
+	return 100 * np.mean(np.abs((y - y_hat) / y))
 
 
+@only_finite
 @label('<=0')
-@flatten
-@only_valid
-def leqz(y1, y2=None):
-	''' Less than or equal to zero (y2) '''
-	if y2 is None: y2 = y1
-	with warnings.catch_warnings():
-		warnings.filterwarnings('ignore')
-		return (y2 <= 0).sum()
+def leqz(y, y_hat=None):
+	''' Less than or equal to zero (y_hat) '''
+	if y_hat is None: y_hat = y
+	return (y_hat <= 0).sum()
 
 
+@validate_shape
 @label('<=0|NaN')
-@flatten
-def leqznan(y1, y2=None):
-	''' Less than or equal to zero (y2) '''
-	if y2 is None: y2 = y1
-	with warnings.catch_warnings():
-		warnings.filterwarnings('ignore')
-		return np.logical_or(np.isnan(y2), y2 <= 0).sum()
+def leqznan(y, y_hat=None):
+	''' Less than or equal to zero (y_hat) '''
+	if y_hat is None: y_hat = y
+	return np.logical_or(np.isnan(y_hat), y_hat <= 0).sum()
 
 
-@label('MdSA')
-@flatten
-@only_valid
+@only_finite
 @only_positive
-def mdsa(y1, y2):
+@label('MdSA')
+def mdsa(y, y_hat):
 	''' Median Symmetric Accuracy '''
 	# https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2017SW001669
-	Q = np.log(y2 / y1)
-	i = np.isfinite(Q)
-	return 100 * (np.exp(np.median(np.abs(Q[i]))) - 1)
+	return 100 * (np.exp(np.median(np.abs(np.log(y_hat / y)))) - 1)
 
 
-@label('MSA')
-@flatten
-@only_valid
+@only_finite
 @only_positive
-def msa(y1, y2):
+@label('MSA')
+def msa(y, y_hat):
 	''' Mean Symmetric Accuracy '''
 	# https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2017SW001669
-	Q = np.log(y2 / y1)
-	i = np.isfinite(Q)
-	return 100 * (np.exp(np.mean(np.abs(Q[i]))) - 1)
+	return 100 * (np.exp(np.mean(np.abs(np.log(y_hat / y)))) - 1)
 
 
-
-@label('SSPB')
-@flatten
-@only_valid
+@only_finite
 @only_positive
-def sspb(y1, y2):
+@label('SSPB')
+def sspb(y, y_hat):
 	''' Symmetric Signed Percentage Bias '''
 	# https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2017SW001669
-	Q = np.log(y2 / y1)
-	i = np.isfinite(Q)
-	M = np.median(Q[i])
+	M = np.median( np.log(y_hat / y) )
 	return 100 * np.sign(M) * (np.exp(np.abs(M)) - 1)
 
 
+@only_finite
 @label('Bias')
-@flatten
-@only_valid
-def bias(y1, y2):
+def bias(y, y_hat):
 	''' Mean Bias '''
-	return np.mean(y2 - y1)
+	return np.mean(y_hat - y)
 
 
-# @label('Bias')
-# @flatten
-# @only_valid
-# def bias(y1, y2):
-# 	''' Median Bias '''
-# 	# return np.median(y2 - y1)
-# 	i  = np.logical_and(y1 > 0, y2 > 0)
-# 	y1 = np.log10(y1[i])
-# 	y2 = np.log10(y2[i])
-# 	i  = np.logical_and(np.isfinite(y1), np.isfinite(y2))
-# 	y1 = y1[i]
-# 	y2 = y2[i]
-# 	return 10**np.median(y2 - y1)
-
-
-@label('R^2')
-@flatten
-@only_valid
+@only_finite
 @only_positive
-def r_squared(y1, y2):
-	y1 = np.log10(y1)
-	y2 = np.log10(y2)
-	i  = np.logical_and(np.isfinite(y1), np.isfinite(y2))
-	if i.sum() < 3: return np.nan
-	slope_, intercept_, r_value, p_value, std_err = stats.linregress(y1[i],y2[i])
+@label('R^2')
+def r_squared(y, y_hat):
+	''' Logarithmic R^2 '''
+	slope_, intercept_, r_value, p_value, std_err = stats.linregress(np.log10(y), np.log10(y_hat))
 	return r_value**2
 
 
-@label('Slope')
-@flatten
-@only_valid
+@only_finite
 @only_positive
-def slope(y1, y2):
-	y1 = np.log10(y1)
-	y2 = np.log10(y2)
-	i  = np.logical_and(np.isfinite(y1), np.isfinite(y2))
-	if i.sum() < 3: return np.nan
-	slope_, intercept_, r_value, p_value, std_err = stats.linregress(y1[i],y2[i])
+@label('Slope')
+def slope(y, y_hat):
+	''' Logarithmic slope '''
+	slope_, intercept_, r_value, p_value, std_err = stats.linregress(np.log10(y), np.log10(y_hat))
 	return slope_
 
 
-@label('Intercept')
-@flatten
-@only_valid
+@only_finite
 @only_positive
-def intercept(y1, y2):
-	y1 = np.log10(y1[i])
-	y2 = np.log10(y2[i])
-	i  = np.logical_and(np.isfinite(y1), np.isfinite(y2))
-	if i.sum() < 3: return np.nan
-	slope_, intercept_, r_value, p_value, std_err = stats.linregress(y1[i],y2[i])
+@label('Intercept')
+def intercept(y, y_hat):
+	''' Locarithmic intercept '''
+	slope_, intercept_, r_value, p_value, std_err = stats.linregress(np.log10(y), np.log10(y_hat))
 	return intercept_
 
 
+@validate_shape
 @label('MWR')
-@flatten
-def mwr(y1, y2, y3):
-	''' Model win rate - y1: true, y2: model, y3: benchmark '''
-	y3[y3 < 0] = np.nan 
-	y2[y2 < 0] = np.nan 
-	y1[y1 < 0] = np.nan 
-	valid = np.logical_and(np.isfinite(y2), np.isfinite(y3))
-	diff1 = np.abs(y1[valid] - y2[valid])
-	diff2 = np.abs(y1[valid] - y3[valid])
-	stats = np.zeros(len(y1))
+def mwr(y, y_hat, y_bench):
+	''' 
+	Model Win Rate - Percent of samples in which model has a closer 
+	estimate than the benchmark.
+		y: true, y_hat: model, y_bench: benchmark 
+	'''
+	y_bench[y_bench < 0] = np.nan 
+	y_hat[y_hat < 0] = np.nan 
+	y[y < 0] = np.nan 
+	valid = np.logical_and(np.isfinite(y_hat), np.isfinite(y_bench))
+	diff1 = np.abs(y[valid] - y_hat[valid])
+	diff2 = np.abs(y[valid] - y_bench[valid])
+	stats = np.zeros(len(y))
 	stats[valid]  = diff1 < diff2
-	stats[~np.isfinite(y3)] = 1
-	stats[~np.isfinite(y2)] = 0
-	return stats.sum() / np.isfinite(y1).sum()
+	stats[~np.isfinite(y_bench)] = 1
+	stats[~np.isfinite(y_hat)] = 0
+	return stats.sum() / np.isfinite(y).sum()
 
 
-def performance(key, y1, y2, metrics=[rmse, slope, mdsa, rmsle, sspb, mape, mae, bias, leqznan]):#[rmse, rmsle, mape, r_squared, bias, mae, leqznan, slope]):
+def performance(key, y, y_hat, metrics=[mdsa, sspb, slope, rmse, rmsle, mae, leqznan]):
 	''' Return a string containing performance using various metrics. 
-		y1 should be the true value, y2 the estimated value. '''
+		y should be the true value, y_hat the estimated value. '''
 	return '%8s | %s' % (key, '   '.join([
-			'%s: %6.3f' % (f.__name__, f(y1,y2)) for f in metrics]))
+			'%s: %6.3f' % (f.__name__, f(y,y_hat)) for f in metrics]))

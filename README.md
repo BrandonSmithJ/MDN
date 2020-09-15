@@ -4,7 +4,7 @@
 This repository contains source code for the following papers:
 
 - <i>["Seamless retrievals of chlorophyll-a from Sentinel-2 (MSI) and Sentinel-3 (OLCI) in inland and coastal waters: A machine-learning approach"](https://www.sciencedirect.com/science/article/pii/S0034425719306248). N. Pahlevan, et al. (2020). Remote Sensing of Environment. 111604. 10.1016/j.rse.2019.111604.</i>
-
+- <i>[""Robust algorithm for estimating total suspended solids (TSS) in inland and nearshore coastal waters"](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301383). S.V. Balasubramanian, et al. (2020). Remote Sensing of Environment. 111768. 10.1016/j.rse.2020.111768.</i> [Code](https://github.com/BrandonSmithJ/MDN/tree/master/Benchmarks/tss/SOLID).
 <br>
 
 ### Usage
@@ -16,14 +16,20 @@ The package can be cloned into a directory with:
 
 The code may then either be used as a library, such as with the following:
 ```
-from MDN import image_estimates, get_tile_Rrs
+from MDN import image_estimates, get_tile_data
 sensor = "<S2A, S2B, or OLCI>"
 
 # Tile should be the output of an atmospheric correction program e.g. SeaDAS
-bands, Rrs = get_tile_Rrs("path/to/my/tile.nc", sensor, allow_neg=False) 
+bands, Rrs = get_tile_data("path/to/my/tile.nc", sensor, allow_neg=False) 
 
-estimates = image_estimates(*Rrs, sensor=sensor)
-chlor_a = estimates[0]
+estimates = image_estimates(Rrs, sensor=sensor)
+chlor_a   = estimates[0]
+
+# Or, with just random data:
+import numpy as np 
+rand_data = [np.random.rand(3,3) for band in get_sensor_bands(sensor)]
+estimates = image_estimates(rand_data, sensor=sensor)
+chlor_a   = estimates[0]
 ```
 
 Or, a .csv file may be given as input, with each row as a single sample. The .csv contents should be only the Rrs values to be estimated on (i.e. no header row or index column).
