@@ -29,7 +29,8 @@ parser.add_argument("--plot_loss", action ="store_true", help="Plot the model lo
 parser.add_argument("--darktheme", action ="store_true", help="Use a dark color scheme in plots")
 parser.add_argument("--animate",   action ="store_true", help="Store the training progress as an animation (mp4)")
 parser.add_argument("--plot_map",  action ="store_true", help="Plot a world map showing locations of the data (if available)")
-parser.add_argument("--save_part", action ="store_true", help="Store partial training statistics & estimates for later analysis")
+parser.add_argument("--save_data", action ="store_true", help="Save the data used for the given args")
+parser.add_argument("--save_stats",action ="store_true", help="Store partial training statistics & estimates for later analysis")
 
 
 ''' Flags which require model retrain if changed '''
