@@ -15,7 +15,7 @@ FLH = L_2 - (L_3 + k*(L_1 - L_3))
 k = (lambda_3 - lambda_2) / (lambda_3 - lambda_1)
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 params = {
 	'MOD'   : [665, 680, 750],

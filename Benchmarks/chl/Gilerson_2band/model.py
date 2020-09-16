@@ -13,7 +13,7 @@ Chla < 5 mg m −3 , and therefore the assumed negligibility of the in-
 fluence of CDOM and SPM is no longer valid under these conditions.
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b'])
 def model(Rrs, wavelengths, *args, **kwargs):

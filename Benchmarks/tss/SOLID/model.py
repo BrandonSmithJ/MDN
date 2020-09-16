@@ -2,9 +2,9 @@
 "Robust algorithm for estimating total suspended solids (TSS) in inland and nearshore coastal waters". S.V. Balasubramanian, et al. (2020).
 '''
 
-from ..utils import get_required, optimize, has_band, closest_band, find_band_idx, to_rrs
+from ...utils import get_required, optimize, has_band, closest_wavelength, find_wavelength, to_rrs
+from ....product_estimation import apply_model as mdn_estimate
 from pathlib import Path
-from MDN.product_estimation import apply_model as mdn_estimate
 import numpy as np
 
 
@@ -27,7 +27,7 @@ params = {
 aw  = get_required([0.3785, 0.4264, 2.72, 4.6], [655, 665, 740, 865])
 bbw = get_required([0.00046, 0.00043, 0.0002625, 0.00014], [655, 665, 740, 865])
 
-def QAA_estimate(Rrs, band=660):
+def _QAA_estimate(Rrs, band=660):
 	# Gordon
 	g0 = 0.0949
 	g1 = 0.0794
@@ -86,10 +86,10 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 		estimate[type3] = (c * bbp_NIR - d).flatten()[type3]
 
 	ests, idxs  = mdn_estimate(Rrs(required), use_cmdline=False, **mdn_kws)
-	bbp_665 = ests[:, idxs['bb_p']][:, find_band_idx(660, required)]
+	bbp_665 = ests[:, idxs['bb_p']][:, find_wavelength(660, required)]
 	estimate[type2] = (a * bbp_665 ** b).flatten()[type2]
 
-	bbp_665 = QAA_estimate(Rrs, closest_band(660, wavelengths))
+	bbp_665 = _QAA_estimate(Rrs, closest_wavelength(660, wavelengths))
 	estimate[type1] = (a * bbp_665 ** b).flatten()[type1]
 
 	return estimate

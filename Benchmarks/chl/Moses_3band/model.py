@@ -7,7 +7,7 @@ SPM and CDOM (R rs (665) and R rs (708) are comparably influenced by
 SPM and CDOM and R rs (753) is mainly driven by backscattering).
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b'])
 def model(Rrs, wavelengths, *args, **kwargs):

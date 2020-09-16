@@ -1,8 +1,8 @@
 '''
-Copy this folder into a product directory, and rename it to be the algorithm name
+
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 # Define any optimizable parameters
 @optimize(['a', 'b'])

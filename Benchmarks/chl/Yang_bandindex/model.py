@@ -1,5 +1,5 @@
 '''
-band index algorithm presented by Yang et al.
+Band index algorithm presented by Yang et al.
 (2010), which is based on a conceptual model (Gitelson et al., 2008)
 that adopts relevant wavebands according to their sensitivity to water
 absorption properties
@@ -13,7 +13,7 @@ coefficients a = 161.24 and b = 28.04 have been calibrated for
 lakes in Japan and China
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b'])
 def model(Rrs, wavelengths, *args, **kwargs):

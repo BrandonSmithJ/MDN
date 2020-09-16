@@ -5,7 +5,7 @@ band model is based on a semi-analytical expression for the red-NIR
 ratio of reflectance in combination with water absorption
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b'])
 def model(Rrs, wavelengths, *args, **kwargs):

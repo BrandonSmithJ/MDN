@@ -1,4 +1,4 @@
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 from ..Gilerson_2band import model as two_band
 from ..OCx import model as OCx
 import numpy as np

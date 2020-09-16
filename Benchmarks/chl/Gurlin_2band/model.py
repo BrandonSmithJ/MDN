@@ -1,9 +1,8 @@
 '''
-two-band empirically derived ratio algorithm
-of Gurlin et al. (2011)
+Two-band empirically derived ratio algorithm of Gurlin et al. (2011)
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b', 'c'])
 def model(Rrs, wavelengths, *args, **kwargs):
