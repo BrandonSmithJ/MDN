@@ -1,10 +1,10 @@
 '''
-normalized difference chlorophyll index
-(NDCI) proposed by Mishra and Mishra (2012) calibrated using field
-data collected from Chesapeake and Delaware Bay
+Normalized Difference Chlorophyll Index (NDCI) proposed by 
+Mishra and Mishra (2012) calibrated using field data collected 
+from Chesapeake and Delaware Bay.
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b', 'c'])
 def model(Rrs, wavelengths, *args, **kwargs):

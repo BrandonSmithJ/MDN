@@ -1,39 +1,47 @@
-from functools import partial
+from functools import partial, update_wrapper
 from scipy.optimize import minimize
-from functools import update_wrapper, partial
+from pathlib import Path
 import numpy as np 
 import warnings
 
 
-def find_band_idx(w, wavelengths):
-	# Index of closest wavelength
-	wavelengths = np.array(wavelengths)
-	return np.abs(wavelengths - np.atleast_1d(w)[:,None]).argmin(1) 	
+def loadtxt(filename, delimiter=','):
+	root_dir = Path(__file__).parent
+	filename = root_dir.joinpath(filename)
+	return np.loadtxt(filename, delimiter=delimiter)
 
 
-def closest_band(w, wavelengths):
-	# Value of closest wavelength
-	wavelengths = np.array(wavelengths)
-	return wavelengths[find_band_idx(w, wavelengths)]
+def find_wavelength(k, waves, validate=True, tol=5):
+	''' Index of closest wavelength '''
+	waves = np.array(waves)
+	w = np.atleast_1d(k)
+	i = np.abs(waves - w[:, None]).argmin(1) 
+	assert(not validate or (np.abs(w-waves[i]).max() <= tol)), f'Needed {k}, but closest was {waves[i]} in {waves}'
+	return i
 
 
-def has_band(w, wavelengths, tol=5):
-	# Closest band within <tol> nm
-	wavelengths = np.array(wavelengths)
-	return np.abs(w - closest_band(w, wavelengths)) <= tol
+def closest_wavelength(k, waves, validate=True, tol=5): 
+	''' Value of closest wavelength '''
+	waves = np.array(waves)
+	return waves[find_wavelength(k, waves, validate, tol)]	
+
+
+def has_band(w, waves, tol=5):
+	''' Ensure band exists within <tol> nm '''
+	return np.abs(w - closest_wavelength(w, np.array(waves), validate=False)) <= tol
 
 
 def to_rrs(Rrs):
-	# Conversion to subsurface reflectance (Lee et al. 2002)
+	''' Conversion to subsurface reflectance (Lee et al. 2002) '''
 	return Rrs / (0.52 + 1.7 * Rrs)
 
 
 def to_Rrs(rrs):
-	# Inverse of to_rrs - conversion from subsurface to remote sensing reflectance
+	''' Inverse of to_rrs - conversion from subsurface to remote sensing reflectance '''
 	return (rrs * 0.52) / (1 - rrs * 1.7)
 
 
-def get_required(Rrs, wavelengths, required=[], tol=5):
+def get_required(Rrs, waves, required=[], tol=5):
 	''' 
 	Checks that all required wavelengths are available in the given data. 
 	Returns an object which acts as a functional interface into the Rrs data,
@@ -42,16 +50,18 @@ def get_required(Rrs, wavelengths, required=[], tol=5):
 		Rrs(443)        # Returns a matrix containing the band data closest to 443nm (shape [N, 1])
 		Rrs([440, 740]) # Returns a matrix containing the band data closest to 440nm, and to 740nm (shape [N, 2])
 	'''
-	wavelengths = np.array(wavelengths)
+	waves = np.array(waves)
 	Rrs = np.atleast_2d(Rrs)
-	assert(Rrs.shape[1] == len(wavelengths)), \
-		f'Shape mismatch: Rrs={Rrs.shape}, wavelengths={len(wavelengths)}'
-	assert(all([has_band(w, wavelengths, tol) for w in required])), \
-		f'At least one of {required} is missing from {wavelengths}'
-	return lambda w: Rrs[:, find_band_idx(w, wavelengths)] if w is not None else Rrs
+	assert(Rrs.shape[1] == len(waves)), \
+		f'Shape mismatch: Rrs={Rrs.shape}, wavelengths={len(waves)}'
+	assert(all([has_band(w, waves, tol) for w in required])), \
+		f'At least one of {required} is missing from {waves}'
+	return lambda w: Rrs[:, find_wavelength(w, waves, tol=tol)] if w is not None else Rrs
 
 
 class Optimizer:
+	'''	Allow benchmark function parameters to be optimized via a set of training data '''
+
 	def __init__(self, function, opt_vars, has_default):
 		self.function    = function
 		self.opt_vars    = opt_vars

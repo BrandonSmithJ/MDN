@@ -1,4 +1,4 @@
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 from ..OC.model import OC
 import numpy as np
 

@@ -1,10 +1,10 @@
 '''
-three-band ratio algorithm of Gurlin et al.
-(2011) which was calibrated using field measurements of R rs and Chla
-taken from Fremont lakes Nebraska
+Three-band ratio algorithm of Gurlin et al. (2011) which 
+was calibrated using field measurements of Rrs and Chla
+taken from Fremont lakes Nebraska.
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b', 'c'])
 def model(Rrs, wavelengths, *args, **kwargs):

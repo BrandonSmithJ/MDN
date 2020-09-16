@@ -2,7 +2,7 @@
 
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 # Define any optimizable parameters
 @optimize([])

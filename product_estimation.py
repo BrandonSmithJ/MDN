@@ -173,6 +173,13 @@ def image_estimates(data, sensor='', product_name='chl', rhos=False, anc=False, 
 	return [p.reshape(im_shape) for p in est_data.T]
 
 
+def apply_model(x_test, use_cmdline=True, **kwargs):
+	''' Apply a model (defined by kwargs and default parameters) to x_test '''
+	args = get_args(kwargs, use_cmdline=use_cmdline)
+	preds, idxs = get_estimates(args, x_test=x_test)
+	return np.median(preds, 0), idxs
+	
+
 def main():
 	args = get_args()
 

@@ -1,10 +1,10 @@
 '''
-simplified version of Gilerson et al. (2010) which
+Simplified version of Gilerson et al. (2010) which
 relates Chla to the NIR-red reflectance band ratio through a simple
-power function;
+power function.
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b'], has_default=False)
 def model(Rrs, wavelengths, *args, **kwargs):

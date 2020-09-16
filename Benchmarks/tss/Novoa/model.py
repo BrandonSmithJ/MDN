@@ -1,8 +1,8 @@
 '''
-Copy this folder into a product directory, and rename it to be the algorithm name
+
 '''
 
-from ..utils import get_required, optimize, has_band
+from ...utils import get_required, optimize, has_band
 import numpy as np 
 
 # Define any optimizable parameters

@@ -32,7 +32,7 @@ Implemented via matlab code by Jeremy Werdell, 2012
 Brandon Smith, NASA Goddard Space Flight Center, April 2018
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 from functools import partial, update_wrapper
 import numpy as np 
 

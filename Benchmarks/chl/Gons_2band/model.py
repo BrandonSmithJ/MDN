@@ -1,11 +1,10 @@
 '''
-semi-analytical algorithm presented by Gons
-et al. (2002, 2005, 2008) which incorporates information on water
-absorption and backscattering in relation to the MERIS red-NIR re-
-flectance ratio
+Semi-analytical algorithm presented by Gons et al. (2002, 2005, 2008) 
+which incorporates information on water absorption and backscattering
+in relation to the MERIS red-NIR reflectance ratio
 '''
 
-from ..utils import get_required, optimize
+from ...utils import get_required, optimize
 
 @optimize(['a', 'b'])
 def model(Rrs, wavelengths, *args, **kwargs):
