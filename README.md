@@ -4,7 +4,7 @@
 This repository contains source code for the following papers:
 
 - <i>["Seamless retrievals of chlorophyll-a from Sentinel-2 (MSI) and Sentinel-3 (OLCI) in inland and coastal waters: A machine-learning approach"](https://www.sciencedirect.com/science/article/pii/S0034425719306248). N. Pahlevan, et al. (2020). Remote Sensing of Environment. 111604. 10.1016/j.rse.2019.111604.</i>
-- <i>[""Robust algorithm for estimating total suspended solids (TSS) in inland and nearshore coastal waters"](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301383). S.V. Balasubramanian, et al. (2020). Remote Sensing of Environment. 111768. 10.1016/j.rse.2020.111768.</i> [Code](https://github.com/BrandonSmithJ/MDN/tree/master/Benchmarks/tss/SOLID).
+- <i>["Robust algorithm for estimating total suspended solids (TSS) in inland and nearshore coastal waters"](https://www.sciencedirect.com/science/article/abs/pii/S0034425720301383). S.V. Balasubramanian, et al. (2020). Remote Sensing of Environment. 111768. 10.1016/j.rse.2020.111768.</i> [Code](https://github.com/BrandonSmithJ/MDN/tree/master/Benchmarks/tss/SOLID).
 <br>
 
 ### Usage
