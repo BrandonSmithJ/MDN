@@ -16,7 +16,7 @@ The package can be cloned into a directory with:
 
 The code may then either be used as a library, such as with the following:
 ```
-from MDN import image_estimates, get_tile_data
+from MDN import image_estimates, get_tile_data, get_sensor_bands
 sensor = "<S2A, S2B, or OLCI>"
 
 # Tile should be the output of an atmospheric correction program e.g. SeaDAS
