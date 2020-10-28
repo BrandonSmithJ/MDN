@@ -3,8 +3,11 @@ Old version of SOLID from:
 "Robust algorithm for estimating total suspended solids (TSS) in inland and nearshore coastal waters". S.V. Balasubramanian, et al. (2020).
 '''
 
-from ...utils import get_required, optimize, has_band, closest_wavelength, find_wavelength, to_rrs
+from ...utils import get_required, optimize, has_band, closest_wavelength, find_wavelength, to_rrs, loadtxt
+from ...other.QAA.model import model as QAA
 from .MDN_old.product_estimation import image_estimates
+
+from scipy.interpolate import CubicSpline as Interpolate
 from pathlib import Path
 import numpy as np
 
@@ -15,27 +18,6 @@ params = {
 	'MOD'   : ([412, 443, 488, 555, 667, 678], 748),
 	'OLCI'  : ([411, 442, 490, 510, 560, 619, 664, 673, 681], 754),
 }
-
-aw  = get_required([0.3785, 0.4264, 2.72, 4.6], [655, 665, 740, 865])
-bbw = get_required([0.00046, 0.00043, 0.0002625, 0.00014], [655, 665, 740, 865])
-
-def _QAA_estimate(Rrs, band=660):
-	# Gordon
-	g0 = 0.0949
-	g1 = 0.0794
-
-	# Lee
-	g0 = 0.084
-	g1 = 0.17
-
-	# QAA
-	g0 = 0.08945
-	g1 = 0.1247  
-
-	u660 = (-g0 + (g0**2 + 4 * g1 * to_rrs(Rrs(band))) ** 0.5) / (2 * g1)
-	a660 = 0.39 * (Rrs(band) / (Rrs(443) + Rrs(485))) ** 1.14 + aw(band).flatten()[0]
-	b660 = (u660 * a660) / (1 - u660) - bbw(band).flatten()[0]
-	return b660
 
 
 # Define any optimizable parameters
@@ -63,14 +45,17 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 	estimate.fill(np.nan)
 
 	if has_band(upper_band, wavelengths, tol):
-		bbp_NIR = (Rrs(upper_band)*(aw(upper_band) + e + bbw(upper_band)) - bbw(upper_band)*f) / (f-Rrs(upper_band))
+		absorb  = Interpolate( *loadtxt('../IOP/aw').T  )
+		scatter = Interpolate( *loadtxt('../IOP/bbw').T )
+		bbp_NIR = (Rrs(upper_band)*(absorb(upper_band) + e + scatter(upper_band)) - scatter(upper_band)*f) / (f-Rrs(upper_band))
 		estimate[type3] = (c * bbp_NIR - d).flatten()[type3]
 
 	bbp = image_estimates(*Rrs(required).T, sensor=sensor)
 	bbp_665 = bbp[find_wavelength(660, required)[0]]
 	estimate[type2] = (a * bbp_665 ** b).flatten()[type2]
 
-	bbp_665 = _QAA_estimate(Rrs, closest_wavelength(660, wavelengths))
+	bbp = QAA(Rrs(None), wavelengths, sensor, *args, **kwargs)['bbp']
+	bbp_665 = get_required(bbp, wavelengths, [])(665)
 	estimate[type1] = (a * bbp_665 ** b).flatten()[type1]
 
 	return estimate

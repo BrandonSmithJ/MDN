@@ -1,8 +1,9 @@
-from functools import partial, update_wrapper
 from scipy.optimize import minimize
+from functools import partial, update_wrapper
+from importlib import import_module
 from pathlib import Path
 import numpy as np 
-import warnings
+import warnings, pkgutil
 
 
 def loadtxt(filename, delimiter=','):
@@ -59,6 +60,36 @@ def get_required(Rrs, waves, required=[], tol=5):
 	return lambda w: Rrs[:, find_wavelength(w, waves, tol=tol)] if w is not None else Rrs
 
 
+def get_benchmark_models(product, allow_opt=False, debug=False):
+	''' 
+	Return all benchmark models within the product directory.
+	If allow_opt=True, models requiring optimization will also be returned.
+	''' 
+	benchmark_dir = Path(__file__).parent.resolve()
+	product_dir   = benchmark_dir.joinpath(Path(product).stem)
+	assert(product_dir.exists()), f'No directory exists for the product "{product}" within {benchmark_dir}'
+
+	# Iterate over all benchmark algorithm folders in the appropriate product directory
+	models = {}
+	for (_, name, is_folder) in pkgutil.iter_modules([product_dir]):
+		if is_folder:
+			
+			module   = Path(__file__).parent.parent.stem
+			imported = import_module(f'{module}.{benchmark_dir.stem}.{product_dir.stem}.{name}.model')
+			for function in dir(imported):
+
+				# Check all functions which have "model" in their name
+				if 'model' in function: 
+					model = getattr(imported, function)
+					
+					# Return models which have default parameters, or all if allowing optimization
+					if getattr(model, 'has_default', False) or allow_opt:
+						model.__name__ = name = getattr(model, 'model_name', name)
+						models[name]   = model
+					elif debug: print(f'{name} requires optimization')
+	return models 
+
+
 class Optimizer:
 	'''	Allow benchmark function parameters to be optimized via a set of training data '''
 
@@ -100,7 +131,7 @@ def optimize(opt_vars, has_default=True):
 	''' 
 
 	def function_wrapper(function):
-		return Optimizer(function, opt_vars, has_default)
+		return update_wrapper(Optimizer(function, opt_vars, has_default), function)
 	return function_wrapper
 
 

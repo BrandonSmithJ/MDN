@@ -1,7 +1,7 @@
-from .utils import get_labels, line_messages, find_wavelength, using_feature
+from .utils import get_labels, line_messages, find_wavelength, using_feature, ignore_warnings
 from .meta import get_sensor_bands
 from .metrics import rmse, rmsle, mape, mae, leqznan, sspb, mdsa
-from .benchmarks import performance, bench_chl, bench_tss
+from .benchmarks import performance
 from .plot_utils import add_identity
 
 from collections import defaultdict as dd
@@ -56,15 +56,15 @@ def add_noise(X, Y, percent=0.10):
 	return X, Y 
 
 
-def save_training_results(args, model, datasets, i, start_time, first, metrics=[mdsa, sspb], folder='Results'):
+def save_training_results(args, model, data, i, start_time, first, metrics=[mdsa, sspb], folder='Results'):
 	''' 
 	Get estimates for the current iteration, applying the model to all available datasets. Store
 	broad performance statistics, as well as the estimates for the first target feature.
 	'''
 
 	# Gather the necessary data into a single object in order to efficiently apply the model to all data at once
-	all_keys = sorted(datasets.keys())
-	all_data = [datasets[k]['x'] for k in all_keys]
+	all_keys = sorted(data.keys())
+	all_data = [data[k]['x_t'] for k in all_keys]
 	all_sums = np.cumsum(list(map(len, [[]] + all_data[:-1])))
 	all_idxs = [slice(c, len(d)+c) for c,d in zip(all_sums, all_data)]
 	all_data = np.vstack(all_data)
@@ -73,8 +73,8 @@ def save_training_results(args, model, datasets, i, start_time, first, metrics=[
 	estimates = model.session.run(model.most_likely, feed_dict={model.x: all_data})
 	estimates = model.scalery.inverse_transform(estimates)
 	estimates = {k: estimates[idxs] for k, idxs in zip(all_keys, all_idxs)}
-	assert(all([estimates[k].shape == datasets[k]['y'].shape for k in all_keys])), \
-		[(estimates[k].shape, datasets[k]['y'].shape) for k in all_keys]
+	assert(all([estimates[k].shape == data[k]['y'].shape for k in all_keys])), \
+		[(estimates[k].shape, data[k]['y'].shape) for k in all_keys]
 
 	save_folder = Path(folder, args.config_name).resolve()
 	if not save_folder.exists():
@@ -87,7 +87,7 @@ def save_training_results(args, model, datasets, i, start_time, first, metrics=[
 		with round_stats_file.open('w+') as fn:
 			fn.write(','.join(['iteration','cumulative_time'] + [f'{k}_{m.__name__}' for k in all_keys for m in metrics]) + '\n')
 
-	stats = [[str(m(y1, y2)) for y1,y2 in zip(datasets[k]['y'].T, estimates[k].T)] for k in all_keys for m in metrics]
+	stats = [[str(m(y1, y2)) for y1,y2 in zip(data[k]['y'].T, estimates[k].T)] for k in all_keys for m in metrics]
 	stats = ','.join([f'[{s}]' for s in [','.join(stat) for stat in stats]])
 	with round_stats_file.open('a+') as fn:
 		fn.write(f'{i},{time.time()-start_time},{stats}\n')
@@ -101,42 +101,33 @@ def save_training_results(args, model, datasets, i, start_time, first, metrics=[
 		filename = save_folder.joinpath(f'round_{args.curr_round}_{k}.csv')
 		if not filename.exists():
 			with filename.open('w+') as fn:
-				fn.write(f'target,{list(datasets[k]["y"][:,0])}\n')
+				fn.write(f'target,{list(data[k]["y"][:,0])}\n')
 
 		with filename.open('a+') as fn:
 			fn.write(f'{i},{list(estimates[k][:,0])}\n')
 
 
-# TODO: make the random state independent from the global random state (using seed from args)
-def train_model(model, x_train, y_train, datasets={}, args=None):
-	save_results = args is not None and hasattr(args, 'save_stats') and args.save_stats and 'test' in datasets
-	plot_loss    = args is not None and args.plot_loss and 'test' in datasets
+class TrainingPlot:
+	def __init__(self, args, model, data):
+		self.args  = args 
+		self.model = model
+		self.data  = data
 
-	for label in datasets:
-		datasets[label]['x'] = model.scalerx.transform(datasets[label]['x']) 
-
-	# Create a live loss plot, which shows a large number of statistics during training
-	if plot_loss:
-		train_test   = np.append(x_train, datasets['test']['x'], 0)	
-		train_losses = dd(list)
-		test_losses  = dd(list)
-		model_losses = []
-
-		import matplotlib.pyplot as plt
-		import matplotlib.animation as animation
-		from matplotlib.patches import Ellipse
-		from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec as GridSubplot
+	def setup(self):
+		self.train_test   = np.append(self.data['train']['x_t'], self.data['test']['x_t'], 0)	
+		self.train_losses = dd(list)
+		self.test_losses  = dd(list)
+		self.model_losses = []
 
 		# Location of 0/-1 in the transformed space
-		zero_line = model.scalery.inverse_transform(np.zeros((1, y_train.shape[-1])))
-		neg_line  = model.scalery.inverse_transform(np.zeros((1, y_train.shape[-1]))-1)
+		self.zero_line = self.model.scalery.inverse_transform(np.zeros((1, self.data['train']['y_t'].shape[-1])))
+		self.neg_line  = self.model.scalery.inverse_transform(np.zeros((1, self.data['train']['y_t'].shape[-1]))-1)
 
-		if args.darktheme: 
+		if self.args.darktheme: 
 			plt.style.use('dark_background')
 
-		cmap  = 'coolwarm'
 		n_ext = 3 # extra rows, in addition to 1-1 scatter plots 
-		n_col = min(5, datasets['test']['y'].shape[1]) 
+		n_col = min(5, self.data['test']['y'].shape[1]) 
 		n_row = n_ext + (n_col + n_col - 1) // n_col
 		fig   = plt.figure(figsize=(5*n_col, 2*n_row))
 		meta  = enumerate( GridSpec(n_row, 1, hspace=0.35) )
@@ -144,15 +135,15 @@ def train_model(model, x_train, y_train, datasets={}, args=None):
 		axs   = [plt.Subplot(fig, sub) for container in conts for sub in container]
 		axs   = axs[:n_col+2] + axs[-4:]
 		[fig.add_subplot(ax) for ax in axs]
-		axs   = [ax.twinx() for ax in axs[:2]] + axs  
+
+		self.axes   = [ax.twinx() for ax in axs[:2]] + axs 
+		self.labels = get_labels(get_sensor_bands(self.args.sensor, self.args), self.model.output_slices, n_col)[:n_col]
+ 
 		plt.ion()
 		plt.show()
 		plt.pause(1e-9)
 
-		plot_metrics = [mape, rmsle]
-		labels = get_labels(get_sensor_bands(args.sensor, args), model.output_slices, n_col)[:n_col]
-
-		if args.animate:
+		if self.args.animate:
 			ani_path = Path('Animations')
 			ani_tmp  = ani_path.joinpath('tmp')
 			ani_tmp.mkdir(parents=True, exist_ok=True)
@@ -161,13 +152,231 @@ def train_model(model, x_train, y_train, datasets={}, args=None):
 			# '-tune zerolatency' fixes issue where firefox won't play the mp4
 			# '-vf pad=...' ensures height/width are divisible by 2 (required by .h264 - https://stackoverflow.com/questions/20847674/ffmpeg-libx264-height-not-divisible-by-2) 
 			extra_args = ["-tune", "zerolatency", "-vf", "pad=width=ceil(iw/2)*2:height=ceil(ih/2)*2:color=white"]
-			ani_writer = animation.writers['ffmpeg_file'](fps=3, extra_args=extra_args)
+			ani_writer = self.ani_writer = animation.writers['ffmpeg_file'](fps=3, extra_args=extra_args)
 			ani_writer.setup(fig, ani_path.joinpath('MDN.mp4').as_posix(), dpi=100, frame_prefix=ani_tmp.joinpath('_').as_posix(), clear_temp=False)
 
+	@ignore_warnings
+	def update(self, plot_metrics=[mdsa, rmsle]):
+		model = self.model
+		if hasattr(model, 'session'):
+			(prior, mu, sigma), est, avg = model.session.run([model.coefs, model.most_likely, model.avg_estimate], feed_dict={model.x: self.train_test})
+			train_loss = model.session.run(model.neg_log_pr, feed_dict={model.x: self.data['train']['x_t'], model.y: self.data['train']['y_t']})				
+			test_loss  = model.session.run(model.neg_log_pr, feed_dict={model.x: self.data['test' ]['x_t'], model.y: self.data['test' ]['y_t']})
+		else:
+			mix = model.model.layers[-1]
+			tt_out = model.model(self.train_test)
+			prior, mu, sigma = mix.get_coefs(tt_out)
+			est = mix.get_most_likely(tt_out).numpy()
+			avg = mix.get_avg_estimate(tt_out).numpy()
+			train_loss = mix.loss(self.data['train']['y_t'], model.model(self.data['train']['x_t'])).numpy()
+			test_loss  = mix.loss(self.data['test' ]['y_t'], model.model(self.data['test' ]['x_t'])).numpy()
+			prior = prior.numpy()
+			mu = mu.numpy()
+			sigma = sigma.numpy()
+
+
+		est = model.scalery.inverse_transform(est)
+		avg = model.scalery.inverse_transform(avg)
+
+		n_xtrain  = len(self.data['train']['x_t'])
+		train_est = est[:n_xtrain ]
+		train_avg = avg[:n_xtrain ]
+		test_est  = est[ n_xtrain:]
+		test_avg  = avg[ n_xtrain:]
+
+		for metric in plot_metrics:
+			self.train_losses[metric.__name__].append([metric(y1, y2) for y1, y2 in zip(self.data['train']['y'].T, train_est.T)])
+			self.test_losses[ metric.__name__].append([metric(y1, y2) for y1, y2 in zip(self.data['test' ]['y'].T, test_est.T)])
+			
+		self.model_losses.append([train_loss, leqznan(test_est), test_loss])
+		test_probs = np.max(   prior, 1)[n_xtrain:]
+		test_mixes = np.argmax(prior, 1)[n_xtrain:]
+		
+		if model.verbose:
+			line_messages([performance(  lbl, y1, y2) for lbl, y1, y2 in zip(self.labels, self.data['test']['y'].T, test_est.T)] + 
+						  [performance('avg', y1, y2) for lbl, y1, y2 in zip(self.labels, self.data['test']['y'].T, test_avg.T)])
+
+		net_loss, zero_cnt, test_loss = np.array(self.model_losses).T
+		[ax.cla() for ax in self.axes]
+
+		# Top two plots, showing training progress
+		for axi, (ax, metric) in enumerate(zip(self.axes[:len(plot_metrics)], plot_metrics)):
+			name = metric.__name__
+			ax.plot(np.array(self.train_losses[name]), ls='--', alpha=0.5)
+			ax.plot(np.array(self.test_losses[name]), alpha=0.8)
+			ax.set_ylabel(metric.__name__, fontsize=8)
+
+			if axi == 0: 
+				n_targets = self.data['train']['y_t'].shape[1]
+				ax.legend(self.labels, bbox_to_anchor=(1.2, 1 + .1*(n_targets//6 + 1)), 
+									   ncol=min(6, n_targets), fontsize=8, loc='center')
+		
+		axi = len(plot_metrics)
+		self.axes[axi].plot(net_loss, ls='--', color='w' if self.args.darktheme else 'k')
+		self.axes[axi].plot(test_loss, ls='--', color='gray')
+		self.axes[axi].plot([np.argmin(test_loss)], [np.min(test_loss)], 'rx')
+		self.axes[axi].set_ylabel('Network Loss', fontsize=8)
+		self.axes[axi].tick_params(labelsize=8)
+		axi += 1
+
+		self.axes[axi].plot(zero_cnt, ls='--', color='w' if self.args.darktheme else 'k')
+		self.axes[axi].set_ylabel('Est <= 0 Count', fontsize=8)
+		self.axes[axi].tick_params(labelsize=8)
+		axi += 1
+
+		# Middle plots, showing 1-1 scatter plot estimates against measurements
+		for yidx, lbl in enumerate(self.labels):
+			ax   = self.axes[axi]
+			axi += 1
+
+			ax.scatter(self.data['test']['y'][:, yidx], test_est[:, yidx], 10, c=test_mixes/prior.shape[1], cmap='jet', alpha=.5, zorder=5)
+			ax.axhline(self.zero_line[0, yidx], ls='--', color='w' if self.args.darktheme else 'k', alpha=.5)
+			# ax.axhline(neg_line[0, yidx], ls='-.', color='w' if self.args.darktheme else 'k', alpha=.5)
+			add_identity(ax, ls='--', color='w' if self.args.darktheme else 'k', zorder=6)
+
+			ax.tick_params(labelsize=5)
+			ax.set_title(lbl, fontsize=8)			
+			ax.set_xscale('log')
+			ax.set_yscale('log')
+			minlim = max(min(self.data['test']['y'][:, yidx].min(), test_est[:, yidx].min()), 1e-3)
+			maxlim = min(max(self.data['test']['y'][:, yidx].max(), test_est[:, yidx].max()), 2000)
+		
+			if np.all(np.isfinite([minlim, maxlim])): 
+				ax.set_ylim((minlim, maxlim)) 
+				ax.set_xlim((minlim, maxlim))
+
+			if yidx == 0:#(yidx % n_col) == 0:
+				ax.set_ylabel('Estimate', fontsize=8)
+
+			if yidx == 0:#(yidx // n_col) == (n_row-(n_ext+1)):
+				ax.set_xlabel('Measurement', fontsize=8)
+
+		# Bottom plot showing likelihood
+		self.axes[axi].hist(test_probs)
+		self.axes[axi].set_xlabel('Likelihood')
+		self.axes[axi].set_ylabel('Frequency')
+		axi += 1
+
+		self.axes[axi].hist(prior, stacked=True, bins=20)
+
+		# Shows two dimensions of a few gaussians
+		# circle = Ellipse((valid_mu[0], valid_mu[-1]), valid_si[0], valid_si[-1])
+		# circle.set_alpha(.5)
+		# circle.set_facecolor('g')
+		# self.axes[axi].add_artist(circle)
+		# self.axes[axi].plot([valid_mu[0]], [valid_mu[-1]], 'r.')
+		# self.axes[axi].set_xlim((-2,2))#-min(valid_si[0], valid_si[-1]), max(valid_si[0], valid_si[-1])))
+		# self.axes[axi].set_ylim((-2,2))#-min(valid_si[0], valid_si[-1]), max(valid_si[0], valid_si[-1])))
+
+		# Bottom plot meshing together all gaussians into a probability-weighted heatmap
+		# Sigmas are of questionable validity, due to data scaling interference
+
+		axi  += 1
+		KEY   = list(model.output_slices.keys())[0]
+		IDX   = model.output_slices[KEY].start
+		sigma = sigma[n_xtrain:, ...]
+		sigma = model.scalery.inverse_transform(sigma.diagonal(0, -2, -1).reshape((-1, mu.shape[-1]))).reshape((sigma.shape[0], -1, sigma.shape[-1]))[..., IDX][None, ...]
+		mu    = mu[n_xtrain:, ...]
+		mu    = model.scalery.inverse_transform(mu.reshape((-1, mu.shape[-1]))).reshape((mu.shape[0], -1, mu.shape[-1]))[..., IDX][None, ...]
+		prior = prior[None, n_xtrain:]
+
+		Y   = np.logspace(np.log10(self.data['test']['y'][:, IDX].min()*.5), np.log10(self.data['test']['y'][:, IDX].max()*1.5), 100)[::-1, None, None]
+		var = 2 * sigma ** 2
+		num = np.exp(-(Y - mu) ** 2 / var)
+		Z   = (prior * (num / (np.pi * var) ** 0.5))
+		I,J = np.ogrid[:Z.shape[0], :Z.shape[1]]
+		mpr = np.argmax(prior, 2)
+		Ztop= Z[I, J, mpr]
+		Z[I, J, mpr] = 0
+		Z   = Z.sum(2)
+		Ztop += 1e-5
+		Z    /= Ztop.sum(0)
+		Ztop /= Ztop.sum(0)
+
+		zp  = prior.copy()
+		I,J = np.ogrid[:zp.shape[0], :zp.shape[1]]
+		zp[I,J,mpr] = 0
+		zp  = zp.sum(2)[0]
+		Z[Z < (Z.max(0)*0.9)] = 0
+		Z   = Z.T
+		zi  = zp < 0.2
+		Z[zi] = np.array([np.nan]*Z.shape[1])
+		Z   = Z.T
+		Z[Z == 0] = np.nan
+
+		ydxs, ysort = np.array(sorted(enumerate(self.data['test']['y'][:, IDX]), key=lambda v:v[1])).T
+		Z    = Z[:, ydxs.astype(np.int32)]
+		Ztop = Ztop[:, ydxs.astype(np.int32)]
+
+		if np.any(np.isfinite(Ztop)):
+			self.axes[axi].pcolormesh(np.arange(Z.shape[1]),Y,
+				preprocessing.MinMaxScaler((0,1)).fit_transform(Ztop), cmap='inferno', shading='gouraud')				
+		if np.any(np.isfinite(Z)):
+			self.axes[axi].pcolormesh(np.arange(Z.shape[1]),Y, Z, cmap='BuGn_r', shading='gouraud', alpha=0.7)
+		# self.axes[axi].colorbar()
+		# self.axes[axi].set_yscale('symlog', linthreshy=y_valid[:, IDX].min()*.5)
+		self.axes[axi].set_yscale('log')
+		self.axes[axi].plot(ysort)#, color='red')
+		self.axes[axi].set_ylabel(KEY)
+		self.axes[axi].set_xlabel('in situ index (sorted by %s)' % KEY)
+		axi += 1
+
+		# Same as last plot, but only show the 20 most uncertain samples
+		pc   = prior[0, ydxs.astype(np.int32)]
+		pidx = np.argsort(pc.max(1))
+		pidx = np.sort(pidx[:20])
+		Z    = Z[:, pidx]
+		Ztop = Ztop[:, pidx]
+		if np.any(np.isfinite(Ztop)):
+			self.axes[axi].pcolormesh(np.arange(Z.shape[1]),Y,
+				preprocessing.MinMaxScaler((0,1)).fit_transform(Ztop), cmap='inferno')
+		if np.any(np.isfinite(Z)):				
+			self.axes[axi].pcolormesh(np.arange(Z.shape[1]),Y, Z, cmap='BuGn_r', alpha=0.7)
+
+		self.axes[axi].set_yscale('log')
+		self.axes[axi].plot(ysort[pidx])#, color='red')
+		self.axes[axi].set_ylabel(KEY)
+		self.axes[axi].set_xlabel('in situ index (sorted by %s)' % KEY)
+
+		plt.pause(1e-9)
+
+		# Store the current plot as a frame for the animation
+		if len(self.model_losses) > 1 and self.args.animate:
+			ani_writer.grab_frame()
+
+			if ((len(self.model_losses) % 5) == 0) or ((i+1) == int(self.args.n_iter)):
+				ani_writer._run()
+
+
+	def finish(self):
+		if self.args.animate:
+			ani_writer.finish()
+		# input('continue?')
+		plt.ioff()
+		plt.close()
+
+
+
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from matplotlib.patches import Ellipse
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec as GridSubplot
+
+# TODO: make the random state independent from the global random state (using seed from args)
+def train_model(model, datasets, args=None):
+	save_results = args is not None and 'test' in datasets and hasattr(args, 'save_stats') and args.save_stats
+	plot_loss    = args is not None and 'test' in datasets and args.plot_loss
+
+	# Create a live loss plot, which shows a large number of statistics during training
+	if plot_loss:
+		Plot = TrainingPlot(args, model, datasets)
+		Plot.setup()
+
 	start_time = time.time()
-	Batch = BatchIndexer(x_train, y_train, model.batch)
+	Batch = BatchIndexer(datasets['train']['x_t'], datasets['train']['y_t'], model.batch)
 	first = True
-	for i in trange(model.n_iter, ncols=70, disable=not model.verbose):
+
+	for i in trange(int(model.n_iter), ncols=70, disable=not model.verbose):
 		x_batch, y_batch = Batch.get_batch()
 
 		# Add gaussian noise
@@ -187,197 +396,13 @@ def train_model(model, x_train, y_train, datasets={}, args=None):
 				first = False
 
 			# Update the performance log / plot
-			else:
-				(prior, mu, sigma), est, avg = model.session.run([model.coefs, model.most_likely, model.avg_estimate], feed_dict={model.x: train_test})
-
-				est = model.scalery.inverse_transform(est)
-				avg = model.scalery.inverse_transform(avg)
-
-				train_est = est[:len(x_train)]
-				train_avg = avg[:len(x_train)]
-				test_est  = est[len(x_train):]
-				test_avg  = avg[len(x_train):]
-
-				train_loss = model.session.run(model.neg_log_pr, feed_dict={model.x: x_train, model.y: y_train})				
-				test_loss  = model.session.run(model.neg_log_pr, feed_dict={model.x: datasets['test']['x'], model.y: model.scalery.transform(datasets['test']['y'])})
-
-				for metric in plot_metrics:
-					train_losses[metric.__name__].append([metric(y1, y2) for y1, y2 in zip(datasets['train']['y'].T, train_est.T)])
-					test_losses[ metric.__name__].append([metric(y1, y2) for y1, y2 in zip(datasets['test' ]['y'].T, test_est.T)])
-					
-				model_losses.append([train_loss, leqznan(test_est), test_loss])
-				test_probs = np.max(prior, 1)[len(x_train):]
-				test_mixes = np.argmax(prior, 1)[len(x_train):]
-				
-				if model.verbose:
-					line_messages([performance(  lbl, y1, y2) for lbl, y1, y2 in zip(labels, datasets['test' ]['y'].T, test_est.T)] + 
-								  [performance('avg', y1, y2) for lbl, y1, y2 in zip(labels, datasets['test' ]['y'].T, test_avg.T)])
-
-				net_loss, zero_cnt, test_loss = np.array(model_losses).T
-
-				[ax.cla() for ax in axs]
-
-				# Top two plots, showing training progress
-				for axi, (ax, metric) in enumerate(zip(axs[:len(plot_metrics)], plot_metrics)):
-					name = metric.__name__
-					ax.plot(np.array(train_losses[name]), ls='--', alpha=0.5)
-					ax.plot(np.array(test_losses[name]), alpha=0.8)
-					ax.set_ylabel(metric.__name__, fontsize=8)
-
-					if axi==0: 
-						ax.legend(labels, bbox_to_anchor=(1.2, 1 + .1*(y_train.shape[1]//6 + 1)), 
-										  ncol=min(6, y_train.shape[1]), fontsize=8, loc='center')
-				
-				axi = len(plot_metrics)
-				axs[axi].plot(net_loss, ls='--', color='w' if args.darktheme else 'k')
-				axs[axi].plot(test_loss, ls='--', color='gray')
-				axs[axi].plot([np.argmin(test_loss)], [np.min(test_loss)], 'rx')
-				axs[axi].set_ylabel('Network Loss', fontsize=8)
-				axs[axi].tick_params(labelsize=8)
-				axi += 1
-
-				axs[axi].plot(zero_cnt, ls='--', color='w' if args.darktheme else 'k')
-				axs[axi].set_ylabel('Est <= 0 Count', fontsize=8)
-				axs[axi].tick_params(labelsize=8)
-				axi += 1
-
-				# Middle plots, showing 1-1 scatter plot estimates against measurements
-				for yidx, lbl in enumerate(labels):
-					ax   = axs[axi]
-					axi += 1
-
-					ax.scatter(datasets['test' ]['y'][:, yidx], test_est[:, yidx], 10, c=test_mixes/prior.shape[1], cmap='jet', alpha=.5, zorder=5)
-					ax.axhline(zero_line[0, yidx], ls='--', color='w' if args.darktheme else 'k', alpha=.5)
-					# ax.axhline(neg_line[0, yidx], ls='-.', color='w' if args.darktheme else 'k', alpha=.5)
-					add_identity(ax, ls='--', color='w' if args.darktheme else 'k', zorder=6)
-
-					ax.tick_params(labelsize=5)
-					ax.set_title(lbl, fontsize=8)
-
-					with warnings.catch_warnings():
-						warnings.filterwarnings('ignore')
-						ax.set_xscale('log')
-						ax.set_yscale('log')
-						minlim = max(min(datasets['test' ]['y'][:, yidx].min(), test_est[:, yidx].min()), 1e-3)
-						maxlim = min(max(datasets['test' ]['y'][:, yidx].max(), test_est[:, yidx].max()), 2000)
-					
-						if np.all(np.isfinite([minlim, maxlim])): 
-							ax.set_ylim((minlim, maxlim)) 
-							ax.set_xlim((minlim, maxlim))
-
-					if (yidx % n_col) == 0:
-						ax.set_ylabel('Estimate', fontsize=8)
-
-					if (yidx // n_col) == (n_row-(n_ext+1)):
-						ax.set_xlabel('Measurement', fontsize=8)
-
-				# Bottom plot showing likelihood
-				axs[axi].hist(valid_probs)
-				axs[axi].set_xlabel('Likelihood')
-				axs[axi].set_ylabel('Frequency')
-				axi += 1
-
-				axs[axi].hist(prior, stacked=True, bins=20)
-
-				# Shows two dimensions of a few gaussians
-				# circle = Ellipse((valid_mu[0], valid_mu[-1]), valid_si[0], valid_si[-1])
-				# circle.set_alpha(.5)
-				# circle.set_facecolor('g')
-				# axs[axi].add_artist(circle)
-				# axs[axi].plot([valid_mu[0]], [valid_mu[-1]], 'r.')
-				# axs[axi].set_xlim((-2,2))#-min(valid_si[0], valid_si[-1]), max(valid_si[0], valid_si[-1])))
-				# axs[axi].set_ylim((-2,2))#-min(valid_si[0], valid_si[-1]), max(valid_si[0], valid_si[-1])))
-
-				# Bottom plot meshing together all gaussians into a probability-weighted heatmap
-				# Sigmas are of questionable validity, due to data scaling interference
-				with warnings.catch_warnings():
-					warnings.filterwarnings('ignore')
-					axi  += 1
-					KEY   = list(model.output_slices.keys())[0]
-					IDX   = model.output_slices[KEY].start
-					sigma = sigma[len(x_train):, ...]
-					sigma = model.scalery.inverse_transform(sigma.diagonal(0, -2, -1).reshape((-1, mu.shape[-1]))).reshape((sigma.shape[0], -1, sigma.shape[-1]))[..., IDX][None, ...]
-					mu    = mu[len(x_train):, ...]
-					mu    = model.scalery.inverse_transform(mu.reshape((-1, mu.shape[-1]))).reshape((mu.shape[0], -1, mu.shape[-1]))[..., IDX][None, ...]
-					prior = prior[None, len(x_train):]
-
-					Y   = np.logspace(np.log10(datasets['test' ]['y'][:, IDX].min()*.5), np.log10(datasets['test' ]['y'][:, IDX].max()*1.5), 100)[::-1, None, None]
-					var = 2 * sigma ** 2
-					num = np.exp(-(Y - mu) ** 2 / var)
-					Z   = (prior * (num / (np.pi * var) ** 0.5))
-					I,J = np.ogrid[:Z.shape[0], :Z.shape[1]]
-					mpr = np.argmax(prior, 2)
-					Ztop= Z[I, J, mpr]
-					Z[I, J, mpr] = 0
-					Z   = Z.sum(2)
-					Ztop += 1e-5
-					Z    /= Ztop.sum(0)
-					Ztop /= Ztop.sum(0)
-
-					zp  = prior.copy()
-					I,J = np.ogrid[:zp.shape[0], :zp.shape[1]]
-					zp[I,J,mpr] = 0
-					zp  = zp.sum(2)[0]
-					Z[Z < (Z.max(0)*0.9)] = 0
-					Z   = Z.T
-					zi  = zp < 0.2
-					Z[zi] = np.array([np.nan]*Z.shape[1])
-					Z   = Z.T
-					Z[Z == 0] = np.nan
-
-					ydxs, ysort = np.array(sorted(enumerate(datasets['test' ]['y'][:, IDX]), key=lambda v:v[1])).T
-					Z    = Z[:, ydxs.astype(np.int32)]
-					Ztop = Ztop[:, ydxs.astype(np.int32)]
-
-					if np.any(np.isfinite(Ztop)):
-						axs[axi].pcolormesh(np.arange(Z.shape[1]),Y,
-							preprocessing.MinMaxScaler((0,1)).fit_transform(Ztop), cmap='inferno', shading='gouraud')				
-					if np.any(np.isfinite(Z)):
-						axs[axi].pcolormesh(np.arange(Z.shape[1]),Y, Z, cmap='BuGn_r', shading='gouraud', alpha=0.7)
-					# axs[axi].colorbar()
-					# axs[axi].set_yscale('symlog', linthreshy=y_valid[:, IDX].min()*.5)
-					axs[axi].set_yscale('log')
-					axs[axi].plot(ysort)#, color='red')
-					axs[axi].set_ylabel(KEY)
-					axs[axi].set_xlabel('in situ index (sorted by %s)' % KEY)
-					axi += 1
-
-					# Same as last plot, but only show the 20 most uncertain samples
-					pc   = prior[0, ydxs.astype(np.int32)]
-					pidx = np.argsort(pc.max(1))
-					pidx = np.sort(pidx[:20])
-					Z    = Z[:, pidx]
-					Ztop = Ztop[:, pidx]
-					if np.any(np.isfinite(Ztop)):
-						axs[axi].pcolormesh(np.arange(Z.shape[1]),Y,
-							preprocessing.MinMaxScaler((0,1)).fit_transform(Ztop), cmap='inferno')
-					if np.any(np.isfinite(Z)):				
-						axs[axi].pcolormesh(np.arange(Z.shape[1]),Y, Z, cmap='BuGn_r', alpha=0.7)
-
-					axs[axi].set_yscale('log')
-					axs[axi].plot(ysort[pidx])#, color='red')
-					axs[axi].set_ylabel(KEY)
-					axs[axi].set_xlabel('in situ index (sorted by %s)' % KEY)
-
-				plt.pause(1e-9)
-
-				# Store the current plot as a frame for the animation
-				if len(model_losses) > 1 and args.animate:
-					ani_writer.grab_frame()
-
-					if ((len(model_losses) % 5) == 0) or ((i+1) == args.n_iter):
-						ani_writer._run()
+			else: Plot.update()
 
 	# Move cursor to correct location
 	if args is not None and args.verbose: 
-		if datasets['test' ]['y'] is not None:
-			for _ in range(datasets['test' ]['y'].shape[1] ): print()
+		if 'test' in datasets and datasets['test']['y'] is not None:
+			for _ in range(datasets['test']['y'].shape[1] ): print()
 
-	if args is not None and args.animate:
-		ani_writer.finish()
-
-	# Allow choice of whether to save the current model
+	# Perform any plotting cleanup 
 	if args is not None and args.plot_loss:
-		# input('continue?')
-		plt.ioff()
-		plt.close()
+		Plot.finish()

@@ -103,7 +103,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 				partial_est.append( np.array(est, ndmin=3) )
 
 			estimates.append( np.hstack(partial_est) )
-			model.session.close()
+			if hasattr(model, 'session'): model.session.close()
 
 			if args.verbose and y_test is not None:
 				median = np.median(np.stack(estimates, axis=1)[0], axis=0)

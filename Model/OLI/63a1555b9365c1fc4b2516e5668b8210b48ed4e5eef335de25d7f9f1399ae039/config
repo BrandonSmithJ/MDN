@@ -1,4 +1,4 @@
-Created: 2020-09-15 10:54:46.138136
+Created: 2020-09-28 11:33:21.034209
 Version: 1.1.0
 --------------
 align: None
@@ -37,8 +37,8 @@ n_rounds: 10
 no_load: False
 no_save: False
 plot_loss: False
-plot_map: False
-save_part: False
+save_data: False
+save_stats: False
 silent: False
 sim_loc: D:/Data/Train
 threshold: None

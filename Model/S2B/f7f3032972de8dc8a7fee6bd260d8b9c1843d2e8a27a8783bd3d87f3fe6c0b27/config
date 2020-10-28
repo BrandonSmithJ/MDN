@@ -1,4 +1,4 @@
-Created: 2020-09-15 11:07:33.748741
+Created: 2020-10-27 16:59:40.311166
 Version: 1.1.0
 --------------
 align: None
@@ -34,11 +34,11 @@ filename: None
 model_loc: Model
 n_redraws: 50
 n_rounds: 10
-no_load: False
+no_load: True
 no_save: False
 plot_loss: False
-plot_map: False
-save_part: False
+save_data: False
+save_stats: False
 silent: False
 sim_loc: D:/Data/Train
 threshold: None

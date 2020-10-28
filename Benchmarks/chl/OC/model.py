@@ -158,7 +158,7 @@ def OC(Rrs, wavelengths, sensor, *args, algorithm='OC', num=3, **kwargs):
 def OC_factory(num):
 	func = update_wrapper(partial(OC, num=num), OC)
 	func = optimize(['a', 'b', 'c', 'd', 'e'])(func)
-	func.model_name = f'OC{num}'
+	func.model_name = f'OC{num}' # Cannot set __name__ directly as most models use the folder as their label
 	return func
 
 model2 = OC_factory(2)
