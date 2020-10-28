@@ -2,6 +2,7 @@ from sklearn.base import TransformerMixin
 from sklearn import preprocessing
 import pickle as pkl
 import numpy as np 
+import warnings
 
 
 class CustomTransformer(TransformerMixin):
@@ -337,7 +338,22 @@ class TransformerPipeline(CustomTransformer):
 
 class CustomUnpickler(pkl.Unpickler):
 	''' Ensure the classes are found, without requiring an import '''
+	_warned = False
+
 	def find_class(self, module, name):
 		if name in globals():
 			return globals()[name]
 		return super().find_class(module, name)
+
+	def load(self, *args, **kwargs):
+		with warnings.catch_warnings(record=True) as w:
+			pickled_object = super().load(*args, **kwargs)
+
+		# For whatever reason, warnings does not respect the 'once' action for
+		# sklearn's "UserWarning: trying to unpickle [...] from version [...] when
+		# using version [...]". So instead, we catch it ourselves, and set the 
+		# 'once' tracker via the unpickler itself.
+		if len(w) and not CustomUnpickler._warned: 
+			warnings.warn(w[0].message, w[0].category)
+			CustomUnpickler._warned = True 
+		return pickled_object

@@ -2,8 +2,8 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '5' 
 
 import tensorflow as tf
-tf.logging.set_verbosity(tf.logging.ERROR)
-
+try: tf.logging.set_verbosity(tf.logging.ERROR)
+except: tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import numpy as np 
 import pickle as pkl 
 import argparse
@@ -92,6 +92,8 @@ class TransformerPipeline(object):
 
 class CustomUnpickler(pkl.Unpickler):
 	''' Ensure the classes are found, without requiring an import '''
+	_warned = False
+
 	def find_class(self, module, name):
 		custom = {
 			'TransformerPipeline' : TransformerPipeline,
@@ -102,6 +104,18 @@ class CustomUnpickler(pkl.Unpickler):
 			return custom[name]
 		return super().find_class(module, name)
 
+	def load(self, *args, **kwargs):
+		with warnings.catch_warnings(record=True) as w:
+			pickled_object = super().load(*args, **kwargs)
+
+		# For whatever reason, warnings does not respect the 'once' action for
+		# sklearn's "UserWarning: trying to unpickle [...] from version [...] when
+		# using version [...]". So instead, we catch it ourselves, and set the 
+		# 'once' tracker via the unpickler itself.
+		if len(w) and not CustomUnpickler._warned: 
+			warnings.warn(w[0].message, w[0].category)
+			CustomUnpickler._warned = True 
+		return pickled_object
 
 class MDN(object):
 	@staticmethod

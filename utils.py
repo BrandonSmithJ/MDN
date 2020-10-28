@@ -317,8 +317,14 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 	def loadtxt(name, loc, _wavelengths): 
 		''' Error handling wrapper over np.loadtxt, with the addition of wavelength selection'''
 		dloc = Path(loc).joinpath(f'{name}.csv')
+
+		# TSS / TSM are synonymous
 		if 'tss' in name and not dloc.exists():
 			dloc = Path(loc).joinpath(f'{name.replace("tss","tsm")}.csv')
+
+		# CDOM is just an alias for a_cdom(443)
+		if 'cdom' in name and not dloc.exists():
+			dloc = Path(loc).joinpath('ag.csv')
 
 		try:
 			assert(dloc.exists()), (f'Key {name} does not exist at {loc} ({dloc})') 
@@ -342,6 +348,8 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 				else:
 					data = data[:, get_valid(name, loc, _wavelengths)]
 
+			if 'cdom' in name and dloc.stem == 'ag':
+				data = data[:, find_wavelength(443, np.loadtxt(Path(loc).joinpath(f'{dloc.stem}_wvl.csv'), delimiter=','))].flatten()[:, None]
 			return data 
 		except Exception as e:
 			# assert(0),e
@@ -510,7 +518,7 @@ def _filter_invalid(x_data, y_data, slices, allow_nan_inp=False, allow_nan_out=F
 	for i, fullset in enumerate(both_data):
 		for subset in fullset:
 			subset[np.isnan(subset)] = -999.
-			subset[subset <= 0]      = np.nan 
+			subset[np.logical_or(subset <= 0, not i and (subset >= 10))] = np.nan 
 			has_nan = np.any if (i and allow_nan_out) or (not i and allow_nan_inp) else np.all 
 			valid   = np.logical_and(valid, has_nan(np.isfinite(subset), 1))
 
@@ -564,7 +572,7 @@ def get_data(args):
 					datasets = [d for d in datasets if d not in ['PACE']]
 				
 				if product == '../chl':
-					datasets = [d for d in datasets if d not in ['Bunkei_a']] # Bunkei contained within sundar's set
+					datasets = [d for d in datasets if d not in ['Arctic']] # Bunkei contained within sundar's set
 				
 			data_folder += datasets
 			data_keys   += [product]
@@ -573,8 +581,8 @@ def get_data(args):
 	order_unique = lambda a: [a[i] for i in sorted(np.unique(a, return_index=True)[1])]
 	data_folder  = order_unique(data_folder)
 	data_keys    = order_unique(data_keys)
-	assert(len(data_folder)), f'No datasets found for {products}'
-	assert(len(data_keys)),  f'No variables found for {products}'
+	assert(len(data_folder)), f'No datasets found for {products} within {data_path}/*/{sensor}'
+	assert(len(data_keys)),  f'No variables found for {products} within {data_path}/*/{sensor}'
 	
 	sensor_loc = [data_path.joinpath(f, sensor) for f in data_folder]
 	x_data, y_data, slices, sources = _load_datasets(data_keys, sensor_loc, bands, allow_missing=('-nan' in args.sensor) or (getattr(args, 'align', None) is not None))
@@ -597,7 +605,6 @@ def get_data(args):
 		
 		x_data = [x_data] + x_align
 		y_data = [y_data] + y_align
-		# ['SeaBASS2_250' 'SeaBASS2_1005' 'SeaBASS2_1010' 'SeaBASS2_1012']
 
 	# if -nan IS in the sensor label: do not filter samples; allow all, regardless of nan composition
 	if '-nan' not in args.sensor: 
