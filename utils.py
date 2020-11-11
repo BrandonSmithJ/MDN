@@ -214,9 +214,9 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 						bands, band_data = _get_tile_wavelengths(nc_data, feature, sensor, allow_neg, landmask=rhos)
 	
 						if len(bands) > 0: 
-							assert(all([len(w.shape) == 2 for w in band_data])), \
-								f'Different shape than expected: {[d.shape for d in band_data]}'
-							data[feature] = np.stack(band_data, axis=-1)
+							assert(len(band_data) == 3), \
+								f'Different shape than expected: {band_data.shape}'
+							data[feature] = band_data
 	
 					elif feature in nc_data.variables:
 						var = nc_data[feature][:]
@@ -237,7 +237,7 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 		data['time_diff'] = np.zeros_like(data[features[0]][:, :, 0])
 
 	assert(len(data) == len(features)), f'Missing features: Found {list(data.keys())}, Expecting {features}'
-	return bands, np.stack([data[f] for f in features], axis=-1)
+	return bands, np.dstack([data[f] for f in features])
 
 
 def generate_config(args, create=True, verbose=True):
