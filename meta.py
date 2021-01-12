@@ -5,6 +5,7 @@ SENSOR_LABEL = { # http://www.ioccg.org/sensors/seawifs.html
 	'TM'     : 'Landsat-5',
 	'ETM'    : 'Landsat-7',
 	'OLI'    : 'Landsat-8', 
+	'L10'    : 'Landsat-10',
 	'OSMI'   : 'Arirang-1',
 	'POLDER' : 'POLDER',
 	'AER'    : 'AERONET',
@@ -44,7 +45,7 @@ def get_sensor_label(sensor):
 
 # --------------------------------------------------------------
 
-SENSOR_BANDS = {
+SENSOR_BANDS = {	
 	'CZCS'     : [     443,           520, 550,                     670                                   ],
 	'TM'       : [               490,      560,                     660                                   ],
 	'ETM'      : [               483,      560,                     662                                   ],
@@ -53,7 +54,8 @@ SENSOR_BANDS = {
 	'OLI-pan'  : [     443,      482,      561,   589,              655,                                  ],
 	'OLI-full' : [     443,      482,      561,                     655,                               865],
 	'OLI-nan'  : [     443,      482,      561,   589,              655,                               865],
-	'OLI-rho'  : [     443,      482,      561,                     655,                                   865, 1609],
+	'OLI-rho'  : [     443,      482,      561,                     655,                               865, 1609],
+	'L10'      : [409, 444,      490,      558,      621, 650,      667,      707, 742                    ],
 	'OSMI'     : [412, 443,      490,      555,                                              765          ],
 	'POLDER'   : [     443,      490,      565,                     670,                     765          ],
 	'AER'      : [412, 442,      490, 530, 551,                     668                                   ],
