@@ -145,25 +145,34 @@ class MDN(object):
 			elif self.no_load and X is None:
 				raise Exception('Model exists, but no_load is set and no training data was given.')
 
-			elif X is not None and y is not None:	
-				X = self.scalerx.fit_transform( self._ensure_format(X) )
-				y = self.scalery.fit_transform( self._ensure_format(y) )
+			elif X is not None and y is not None:
+				self.scalerx.fit( self._ensure_format(X) )
+				self.scalery.fit( self._ensure_format(y) )
+
+				# Gather all data (train, validation, test, ...) into singular object
+				datasets = kwargs['datasets'] = kwargs.get('datasets', {})
+				datasets.update({'train': {'x' : X, 'y': y}})
+
+				for key, data in datasets.items(): 
+					datasets[key].update({
+						'x_t' : self.scalerx.transform( self._ensure_format(data['x']) ),
+						'y_t' : self.scalery.transform( self._ensure_format(data['y']) ),
+					})
 
 				self.output_slices = output_slices
-				self.n_in   = X.shape[1]
-				self.n_pred = y.shape[1] 
+				self.n_in   = datasets['train']['x_t'].shape[1]
+				self.n_pred = datasets['train']['y_t'].shape[1] 
 				self.n_out  = self.n_mix * (1 + self.n_pred + (self.n_pred*(self.n_pred+1))//2) # prior, mu, (lower triangle) sigma
 				# print(f'Training model with shapes X={X.shape} and ys={y.shape}')
 				
 				self.construct_model()
-				train_model(self, X, y, **kwargs)
+				train_model(self, **kwargs)
 				self.save_model()
 
 			else:
 				raise Exception(f"No trained model exists at: \n{self.model_path}")
 			self.graph.finalize()
 		return self 
-
 
 	@ignore_warnings
 	def predict(self, X, confidence_interval=None, threshold=None):

@@ -2,6 +2,7 @@ from pathlib import Path
 from sklearn import preprocessing
 from tqdm  import trange 
 import numpy as np 
+import hashlib
 
 from .mdn   import MDN
 from .meta  import get_sensor_bands, SENSOR_LABEL, ANCILLARY, PERIODIC
@@ -13,7 +14,7 @@ from .parameters import get_args
 from .transformers import TransformerPipeline, LogTransformer, RatioTransformer, BaggingColumnTransformer
 
 
-def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, output_slices=None):
+def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, output_slices=None, dataset_labels=None):
 	''' 
 	Estimate all target variables for the given x_test. If a model doesn't 
 	already exist, creates a model with the given training data. 
@@ -31,7 +32,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 	]
 
 	# We only want bagging to be applied to the columns if there are a large number of feature (e.g. ancillary features included) 
-	many_features = (x_train is not None and x_train.shape[1] > 20) or (x_test is not None and x_test.shape[1] > 20)
+	many_features = any(x is not None and (x.shape[1]-len(wavelengths)) > 15 for x in [x_train, x_test])
 
 	# Add bagging to the columns (use a random subset of columns, excluding the first <n_wavelengths> columns from the process)
 	if using_feature(args, 'bagging') and (using_feature(args, 'ratio') or many_features):
@@ -46,8 +47,20 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 			store_scaler(RatioTransformer, [list(wavelengths)]),
 		] + args.x_scalers
 
+	# Add a few additional variables to be stored in the generated config file
+	setattr(args, 'data_wavelengths', list(wavelengths))
+	if x_train is not None: setattr(args, 'data_xtrain_shape', x_train.shape)
+	if y_train is not None: setattr(args, 'data_ytrain_shape', y_train.shape)
+	if x_test  is not None: setattr(args, 'data_xtest_shape',  x_test.shape)
+	if y_test  is not None: setattr(args, 'data_ytest_shape',  y_test.shape)
+	if dataset_labels is not None: 
+		sets_str  = ','.join(sorted(map(str, np.unique(dataset_labels))))
+		sets_hash = hashlib.sha256(sets_str.encode('utf-8')).hexdigest()
+		setattr(args, 'datasets_hash', sets_hash)
+
 	model_path = generate_config(args, create=x_train is not None)	
 	args.config_name = model_path.name
+	if args.verbose: print(model_path)
 
 	uppers, lowers   = [], []
 	x_full, y_full   = x_train, y_train
@@ -249,7 +262,7 @@ def main():
 		print(f'Test valid: {np.isfinite(y_test).sum(0)}')
 		print(f'Min/Max wavelength: {bands[0]}, {bands[-1]}\n')
 
-		estimates, est_slice = get_estimates(args, x_train, y_train, x_test, y_test, slices)
+		estimates, est_slice = get_estimates(args, x_train, y_train, x_test, y_test, slices, dataset_labels=locs[:,0])
 		estimates = np.median(estimates, 0)
 		print('Shape Estimates:', estimates.shape)
 		print('Min/Max Estimates:', get_minmax(estimates), '\n')
@@ -268,5 +281,5 @@ def main():
 	# Otherwise, train a model with all data (if not already existing)
 	else:
 		x_data, y_data, slices, locs = get_data(args)
-		get_estimates(args, x_data, y_data, output_slices=slices)
+		get_estimates(args, x_data, y_data, output_slices=slices, dataset_labels=locs[:,0])
 
