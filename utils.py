@@ -214,7 +214,7 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 						bands, band_data = _get_tile_wavelengths(nc_data, feature, sensor, allow_neg, landmask=rhos)
 	
 						if len(bands) > 0: 
-							assert(len(band_data) == 3), \
+							assert(len(band_data.shape) == 3), \
 								f'Different shape than expected: {band_data.shape}'
 							data[feature] = band_data
 	
