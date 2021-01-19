@@ -1,5 +1,5 @@
 from scipy.optimize import minimize
-from functools import partial, update_wrapper
+from functools import partial, update_wrapper, wraps
 from importlib import import_module
 from pathlib import Path
 import numpy as np 
@@ -17,7 +17,7 @@ def find_wavelength(k, waves, validate=True, tol=5):
 	waves = np.array(waves)
 	w = np.atleast_1d(k)
 	i = np.abs(waves - w[:, None]).argmin(1) 
-	assert(not validate or (np.abs(w-waves[i]).max() <= tol)), f'Needed {k}, but closest was {waves[i]} in {waves}'
+	assert(not validate or (np.abs(w-waves[i]).max() <= tol)), f'Needed {k}, but closest was {waves[i]} in {waves} ({np.abs(w-waves[i]).max()} > {tol})'
 	return i
 
 
@@ -57,44 +57,71 @@ def get_required(Rrs, waves, required=[], tol=5):
 		f'Shape mismatch: Rrs={Rrs.shape}, wavelengths={len(waves)}'
 	assert(all([has_band(w, waves, tol) for w in required])), \
 		f'At least one of {required} is missing from {waves}'
-	return lambda w: Rrs[:, find_wavelength(w, waves, tol=tol)] if w is not None else Rrs
+	return lambda w, validate=True: Rrs[:, find_wavelength(w, waves, tol=tol, validate=validate)] if w is not None else Rrs
 
 
-def get_benchmark_models(product, allow_opt=False, debug=False):
+def get_benchmark_models(products, allow_opt=False, debug=False, method=None):
 	''' 
-	Return all benchmark models within the product directory.
+	Return all benchmark models within the product directory, as well as those
+	within the 'multiple' directory. Note that this means some models returned 
+	will not be applicable to the given product(s), and will need to be filtered.
 	If allow_opt=True, models requiring optimization will also be returned.
 	''' 
-	benchmark_dir = Path(__file__).parent.resolve()
-	product_dir   = benchmark_dir.joinpath(Path(product).stem)
-	assert(product_dir.exists()), f'No directory exists for the product "{product}" within {benchmark_dir}'
+	products = list(np.atleast_1d(products))
+	models   = {}
+	for product in products + ['multiple']:
+		benchmark_dir = Path(__file__).parent.resolve()
+		product_dir   = benchmark_dir.joinpath(Path(product).stem)
+		assert(product_dir.exists()), f'No directory exists for the product "{product}" within {benchmark_dir}'
 
-	# Iterate over all benchmark algorithm folders in the appropriate product directory
-	models = {}
-	for (_, name, is_folder) in pkgutil.iter_modules([product_dir]):
-		if is_folder:
-			
-			module   = Path(__file__).parent.parent.stem
-			imported = import_module(f'{module}.{benchmark_dir.stem}.{product_dir.stem}.{name}.model')
-			for function in dir(imported):
+		# Iterate over all benchmark algorithm folders in the appropriate product directory
+		for (_, name, is_folder) in pkgutil.iter_modules([product_dir]):
+			if is_folder:
+				
+				module   = Path(__file__).parent.parent.stem
+				imported = import_module(f'{module}.{benchmark_dir.stem}.{product_dir.stem}.{name}.model')
+				for function in dir(imported):
 
-				# Check all functions which have "model" in their name
-				if 'model' in function: 
-					model = getattr(imported, function)
-					
-					# Return models which have default parameters, or all if allowing optimization
-					if getattr(model, 'has_default', False) or allow_opt:
-						model.__name__ = name = getattr(model, 'model_name', name)
-						models[name]   = model
-					elif debug: print(f'{name} requires optimization')
-	return models 
+					# Check all functions which have "model" in their name
+					if 'model' in function: 
+						model = getattr(imported, function)
+						
+						# Return models which have default parameters, or all if allowing optimization
+						if getattr(model, 'has_default', False) or allow_opt:
+
+							# Within the 'multiple' directory, ensure model outputs contain a requested product 
+							if product != 'multiple' or any(p in model._output_keys for p in products):
+								model.__name__ = model.__dict__['__name__'] = name = getattr(model, 'model_name', name)
+								models[name]   = model
+
+						elif debug: 
+							print(f'{name} requires optimization')
+
+	assert(method is None or method in models), f'Unknown algorithm "{method}". Options are: \n{list(models.keys())}'
+	return models if method is None else {method: models[method]} 
 
 
+class GlobalRandomManager:
+	''' Context manager to temporarily set the global random state for
+		any methods which aren't using a seed or local random state. '''
+
+	def __init__(self, seed=None):
+		self.seed  = seed
+		self.state = None
+
+	def __enter__(self):
+		self.state = np.random.get_state()
+		np.random.seed(self.seed)
+
+	def __exit__(self, *args, **kwargs):
+		np.random.set_state(self.state)
+
+		
 class Optimizer:
 	'''	Allow benchmark function parameters to be optimized via a set of training data '''
 
 	def __init__(self, function, opt_vars, has_default):
-		self.function    = function
+		self.function    = self.trained_function = function
 		self.opt_vars    = opt_vars
 		self.has_default = has_default
 
@@ -115,11 +142,10 @@ class Optimizer:
 		# res  = minimize(cost_func, init, tol=1e-6, options={'maxiter':1e3}, method='BFGS')
 		res  = gbrt_minimize(cost_func, init, n_random_starts=10000, n_calls=10000)#, method='SLSQP')#, tol=1e-10, options={'maxiter':1e5}, method='SLSQP')
 		print(self.__name__, res.x, res.fun)
-
 		self.trained_function = partial(self.function, wavelengths=wavelengths, **dict(zip(self.opt_vars, res.x)))
 
-	def predict(self, X):
-		return self.trained_function(X)
+	def predict(self, *args, **kwargs):
+		return self.trained_function(*args, **kwargs)
 
 
 def optimize(opt_vars, has_default=True):
@@ -132,6 +158,30 @@ def optimize(opt_vars, has_default=True):
 
 	def function_wrapper(function):
 		return update_wrapper(Optimizer(function, opt_vars, has_default), function)
+	return function_wrapper
+
+
+def set_outputs(output_keys):
+	''' All models within the 'multiple' folder should be decorated with this, 
+		as the model output should be a dictionary. This decorator takes as input
+		a list of products (the keys within the output dict) and makes them 
+		available to check, without needing to run the model beforehand. As well,
+		models can take 'product' as a keyword argument, and will then return only
+		that product. 
+	'''
+	def function_wrapper(function):
+
+		@wraps(function)
+		def select_output(*args, **kwargs):
+			# If product is given as a keyword argument and it is contained in
+			# the output dictionary, return the requested output. Otherwise, 
+			# return the entire dictionary.
+			output  = function(*args, **kwargs)
+			product = kwargs.get('product', None)
+			return output.get(product, output)
+
+		setattr(select_output, '_output_keys', output_keys)
+		return select_output
 	return function_wrapper
 
 
