@@ -7,8 +7,6 @@ import pkgutil, traceback
 from .. import image_estimates, get_tile_data, get_sensor_bands 
 from ..meta import SENSOR_BANDS
 from ..Benchmarks.utils import get_benchmark_models
-from ..benchmarks import get_methods
-
 
 SHOW_TRACEBACK = True # Show the stack trace for any exceptions 
 
@@ -70,9 +68,10 @@ def test_benchmarks():
 	for product, benchmarks in product_benchmarks.items():
 		print(f'\n\t{product:>{longest_product}}: {len(benchmarks)} benchmarks found')
 
-		longest = max(map(len, benchmarks))
-		for name, model in benchmarks.items():
-			print(f'\t\t\t{name:>{longest}}: { _test_success(test_benchmark, model, _tab_level=4) }')
+		if len(benchmarks):
+			longest = max(map(len, benchmarks))
+			for name, model in benchmarks.items():
+				print(f'\t\t\t{name:>{longest}}: { _test_success(test_benchmark, model, _tab_level=4) }')
 
 
 

@@ -269,7 +269,7 @@ def main():
 
 		labels     = get_labels(bands, slices, y_test.shape[1])
 		products   = args.product.split(',') 
-		benchmarks = run_benchmarks(args, args.sensor, x_test, y_test, {p:slices[p] for p in products}, silent=False, x_train=x_train, y_train=y_train, gridsearch=False, with_ml=False)
+		benchmarks = run_benchmarks(args.sensor, x_test, y_test, x_train, y_train, {p:slices[p] for p in products}, verbose=True, return_ml=False)
 		benchmarks['MDN'] = estimates
 
 		for p in products:

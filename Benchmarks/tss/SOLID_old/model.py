@@ -4,7 +4,7 @@ Old version of SOLID from:
 '''
 
 from ...utils import get_required, optimize, has_band, closest_wavelength, find_wavelength, to_rrs, loadtxt
-from ...other.QAA.model import model as QAA
+from ...multiple.QAA.model import model as QAA
 from .MDN_old.product_estimation import image_estimates
 
 from scipy.interpolate import CubicSpline as Interpolate
@@ -26,7 +26,7 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 	sensor = sensor.replace('S2B','MSI').replace('MODA', 'MOD')
 	required, upper_band = params[sensor]
 
-	tol = kwargs.get('tol', 10) # allowable difference from the required wavelengths
+	tol = kwargs.get('tol', 11) # allowable difference from the required wavelengths
 	Rrs = get_required(Rrs, wavelengths, required, tol) # get values as a function: Rrs(443)
 
 	# Set default values for these parameters
@@ -55,7 +55,7 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 	estimate[type2] = (a * bbp_665 ** b).flatten()[type2]
 
 	bbp = QAA(Rrs(None), wavelengths, sensor, *args, **kwargs)['bbp']
-	bbp_665 = get_required(bbp, wavelengths, [])(665)
+	bbp_665 = get_required(bbp, wavelengths, [], tol)(665)
 	estimate[type1] = (a * bbp_665 ** b).flatten()[type1]
 
 	return estimate

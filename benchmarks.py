@@ -1,18 +1,19 @@
 from .metrics          import performance
 from .utils            import find_wavelength, ignore_warnings
 from .meta             import get_sensor_bands
-from .transformers     import TransformerPipeline, LogTransformer
-from .Benchmarks.utils import get_benchmark_models
+from .transformers     import TransformerPipeline, LogTransformer, RatioTransformer
+from .Benchmarks.utils import get_benchmark_models, GlobalRandomManager
 
-from importlib import import_module
-from functools import partial, update_wrapper
-from pathlib   import Path 
+from collections import defaultdict as dd
+from importlib   import import_module
+from functools   import partial, update_wrapper
+from pathlib     import Path 
 
 import numpy as np
-import pkgutil, warnings, sys, os
+import pkgutil, warnings, traceback, sys, os
 
 
-def get_methods(wavelengths, sensor, product, debug=False, allow_opt=False, **kwargs):
+def get_models(wavelengths, sensor, product, debug=False, allow_opt=False, method=None, **kwargs):
 	''' Retrieve all benchmark functions from the appropriate product
 		directory. Import each function with "model" in the function
 		name, ensure any necessary parameters have a default value 
@@ -20,14 +21,18 @@ def get_methods(wavelengths, sensor, product, debug=False, allow_opt=False, **kw
 		given wavelengths. A template folder for new algorithms is 
 		available in the Benchmarks directory.
 	'''
-	models = get_benchmark_models(product, allow_opt, debug)
-	sensor = sensor.split('-')[0] # remove any extra data which is used by the MDN
 	valid  = {}
+	sensor = sensor.split('-')[0] # remove any extra data which is used by the MDN
+	models = get_benchmark_models(product, allow_opt, debug, method)
+	kwargs.update({
+		'sensor'      : sensor, 
+		'wavelengths' : wavelengths, 
+		'product'     : product,
+	})
 
 	# Gather all models which return an output with the available wavelengths
 	for name, model in models.items():
 		sample_input = np.ones((1, len(wavelengths)))
-		model_args   = [sample_input, wavelengths, sensor]
 		model_kwargs = dict(kwargs)
 
 		# Add a set of optimization dummy parameters to check if wavelengths are valid for the method
@@ -35,216 +40,150 @@ def get_methods(wavelengths, sensor, product, debug=False, allow_opt=False, **kw
 			model_kwargs.update( dict(zip(model.opt_vars, [1]*len(model.opt_vars))) )
 
 		try:
-			assert(model(*model_args, **model_kwargs) is not None), 'Output is None'
-			valid[name] = update_wrapper(partial(model, sensor=sensor), model)
+			output = model(sample_input, **model_kwargs)
+			assert(output is not None), f'Output for {name} is None'
+			assert(not isinstance(output, dict)), f'"{product}" not found in the outputs of {name}'
+			valid[name] = update_wrapper(partial(model, **kwargs), model)
 		except Exception as e: 
-			if debug: print(f'Exception for function {name}: {e}')		
+			if debug: print(f'Exception for function {name}: {e}\n{traceback.format_exc()}')		
 	return valid
 
 
 @ignore_warnings
-def bench_product(sensor, X, y=None, bands=None, args=None, slices=None, silent=False, product='chl', method=None):	
-	if bands is None:
-		bands = get_sensor_bands(sensor, args)
-	assert(X.shape[1] == len(bands)), f'Too many features given as bands for {sensor}: {X.shape[1]} vs {len(bands)}'
-
-	if product in ['a', 'aph', 'ap', 'ag', 'aph', 'adg', 'b', 'bbp']:
-		from .QAA import QAA
-		methods = {'QAA': lambda *args, **kwargs: QAA(*args)[product]}
+def run_benchmarks(sensor, x_test, y_test=None, x_train=None, y_train=None, slices=None, args=None, 
+					*, product='chl', bands=None, verbose=False, 
+					return_rs=True, return_ml=False, return_opt=False,
+					kwargs_rs={},   kwargs_ml={},    kwargs_opt={}):
 	
-		if product in ['a', 'aph', 'adg', 'b', 'bbp']:
-			from .GIOP.giop import GIOP
-			methods['GIOP'] = lambda *args, **kwargs: GIOP(*args, sensor=sensor)[product]
-	else:
-		methods = get_methods(bands, sensor, product, tol=15)
-	assert(method is None or method in methods), f'Unknown algorithm "{method}". Options are: \n{list(methods.keys())}'
+	def assert_same_features(a, b, label):
+		assert(a is None or b is None or a.shape[1] == b.shape[1]), \
+			f'Differing number of {label} features: {a.shape[1]} vs {b.shape[1]}'
 
-	ests = []
-	lbls = []
-	for name, func in methods.items():
-		if method is None or name == method:
-			est_val = func(X, bands, tol=15)
-			if product == 'chl':
-				# est_val[~np.isfinite(est_val)] = 0
-				est_val[est_val < 0] = np.nan#0
+	slices = slices or {product: slice(None)}
+	bands  = np.array(get_sensor_bands(sensor, args) if bands is None else bands)
+	bench  = dd(dict)
 
-			if not silent and y is not None:
-				curr_slice = slices
-				if slices is None:
-					assert(y.shape[1] == est_val.shape[1]), 'Ambiguous y data provided - need to give slices parameter.'
-					curr_slice = {product:slice(None)}
+	# Ensure training / testing data have the same number of features, and the appropriate number of bands
+	assert_same_features(x_test, x_train, 'x')
+	assert_same_features(y_test, y_train, 'y')
+	assert_same_features(x_test, np.atleast_2d(bands), f'{sensor} band')
+	
+	if (return_ml or return_opt) and (x_train is None or y_train is None):
+		raise Exception('Training data must be passed to use ML/Opt models')
 
-				ins_val = y[:, curr_slice[product]]
-				for i in range(ins_val.shape[1]):
-					print( performance(name, ins_val[:, i], est_val) )
-			ests.append(est_val)
-			lbls.append(name)
-	return dict(zip(lbls, ests))
+	# Set the avaliable products for each set of benchmarking methods
+	products_rs  = ['chl', 'tss', 'cdom', 'a', 'aph', 'ap', 'ag', 'aph', 'adg', 'b', 'bbp']
+	products_ml  = ['chl', 'tss', 'cdom']
+	products_opt = ['chl', 'tss', 'cdom']
+
+	# Get the benchmark estimates for each product individually
+	for product in slices:
+
+		kwargs_default = {
+			'bands'   : bands,
+			'args'    : args,
+			'sensor'  : sensor, 
+			'product' : product,
+			'verbose' : verbose,
+			'x_train' : x_train,
+			'x_test'  : x_test,
+			'y_train' : y_train[:, slices[product]] if y_train is not None else None,
+			'y_test'  :  y_test[:, slices[product]] if y_test  is not None else None,
+		}
+
+		for bench_return, bench_products, bench_kwargs, bench_function in [
+			(return_rs,  products_rs,  dict(kwargs_rs ),  _bench_rs ),
+			(return_ml,  products_ml,  dict(kwargs_ml ),  _bench_ml ),
+			(return_opt, products_opt, dict(kwargs_opt),  _bench_opt),
+		]:
+			if bench_return and product in bench_products:
+				bench_kwargs.update(kwargs_default)
+				bench[product].update( bench_function(**bench_kwargs) )
+	return dict(bench)
+
+
+def _create_estimates(model, inputs, postprocess=None, preprocess=None, **kwargs): 
+	if postprocess is None: postprocess = lambda x: x
+	if preprocess  is None: preprocess  = lambda x: x
+	
+	model     = preprocess(model) or model 
+	outputs   = getattr(model, 'predict', model)(inputs.copy())
+	estimates = postprocess(outputs.flatten()[:, None])
+
+	if kwargs.get('verbose', False) and kwargs.get('y_test', None) is not None:
+		print( performance(model.__name__, kwargs['y_test'], estimates) )
+	return estimates
+
+
+def _bench_rs(sensor, bands, x_test, product='chl', method=None, tol=15, allow_opt=False, **kwargs):	
+	postps = lambda x: (np.copyto(x, np.nan, where=x < 0) or x) if product == 'chl' else x 
+	create = lambda f: _create_estimates(f, x_test, postps, **kwargs)
+	models = get_models(bands, sensor, product, method=method, tol=tol, allow_opt=allow_opt)
+	return {name: create(model) for name, model in models.items()}
 	
 
-def bench_opt(args, sensor, x_train, x_test, y_train, y_test, slices, silent=False, product='chl'):
-	waves   = np.array(get_sensor_bands(sensor))
-	methods = get_methods(waves, sensor, product, allow_opt=True)
-
-	ests = []
-	lbls = []
-	for name, method in methods.items():
-		method.fit(x_train, y_train, waves)
-		est_chl = method.predict(x_test)
-
-		if not silent:
-			ins_val = y_test[:, slices[product]]
-			for i in range(ins_val.shape[1]):
-				print( performance(name.split('_')[0], ins_val[:, i], est_chl) )
-		ests.append(est_chl)
-		lbls.append(name+'_opt')
-	return dict(zip(lbls, ests))
+def _bench_opt(sensor, bands, x_train, y_train, *args, **kwargs):
+	preproc = lambda m: m.fit(x_train, y_train, bands)
+	estims  = _bench_rs(sensor, bands, *args, allow_opt=True, preprocess=preproc, **kwargs)
+	return {f'{k}_opt': v for k, v in estims.items()}
 
 
-@ignore_warnings
-def bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices=None, silent=False, product='chl', x_other=None, 
-			bagging=True, gridsearch=False, scale=True):
-	from sklearn.preprocessing import RobustScaler, QuantileTransformer, MinMaxScaler
+def _bench_ml(sensor, x_train, y_train, x_test, *, x_other=None, verbose=False,
+			seed=42, bagging=True, gridsearch=False, scale=True, **kwargs):
+
+	from sklearn.preprocessing import RobustScaler, MinMaxScaler
 	from sklearn.model_selection import GridSearchCV
 	from sklearn.ensemble import BaggingRegressor
-	from sklearn import gaussian_process, svm, neural_network, kernel_ridge, neighbors
-	from xgboost import XGBRegressor as XGB
-	from sklearn.exceptions import ConvergenceWarning
-	warnings.simplefilter("always", ConvergenceWarning)
-	assert(y_train.shape[1] == 1), 'Can only use ML benchmarks on chl data'
-	from .mdn          import MDN 
+	from .Benchmarks.ML import models 
+	from .transformers import AUCTransformer
 
-	methods = {
-		'XGB' : {
-			'class'   : XGB,
-			'default' : {'max_depth': 15, 'n_estimators': 50, 'objective': 'reg:squarederror'},
-			'grid'    : {
-				'n_estimators' : [10, 50, 100],
-				'max_depth'    : [5, 15, 30],
-				'objective'    : ['reg:squarederror'],
-			}},
-		'SVM' : {
-			'class'   : svm.SVR,
-			'default' : {'C': 1e1, 'gamma': 'scale', 'kernel': 'rbf'},
-			'grid'    : {
-				'kernel' : ['rbf', 'poly'],
-				'gamma'  : ['auto', 'scale'],
-				'C'      : [1e-1, 5e-1, 1e0, 5e0, 1e1, 5e1, 1e2],
-			}},
-		'MLP' : {
-			'class'   : neural_network.MLPRegressor,
-			'default' : {'alpha': 1e-05, 'hidden_layer_sizes': [100]*5, 'learning_rate': 'constant'},
-			'grid'    : {
-				'hidden_layer_sizes' : [[100]*i for i in range(1, 6)],
-				'alpha'              : [1e-5, 1e-4, 1e-3, 1e-2],
-				'learning_rate'      : ['constant', 'adaptive'],
-			}},
-		'KNN' : {
-			'class'   : neighbors.KNeighborsRegressor,
-			'default' : {'n_neighbors': 5, 'p': 1},
-			'grid'    : {
-				'n_neighbors' : [3, 5, 10, 20],
-				'p'           : [1, 2, 3],
-			}},
-		# 'MDN' : {
-		# 	'class'  : MDN,
-		# 	'default': {'no_load': True},
-		# 	'grid'   : {
-		# 		'hidden': [[100]*i for i in [2,3,5]],
-		# 		'l2' : [1e-5,1e-4,1e-3],
-		# 		'lr' : [1e-5,1e-4,1e-3],
-		# 	}},
-		# 'KRR' : {
-		# 	'class'   : kernel_ridge.KernelRidge,
-		# 	'default' : {'alpha': 1e1, 'kernel': 'laplacian'},
-		# 	'grid'    : {
-		# 		'alpha' : [1e-1, 1e0, 1e1, 1e2],
-		# 		'kernel': ['rbf', 'laplacian', 'linear'],
-		# 	}},
-		# 'GPR' : {
-		# 	'class'   : gaussian_process.GaussianProcessRegressor,
-		# 	'default' : {'kernel': gaussian_process.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gaussian_process.kernels.RBF(1.0, (1e-1, 1e3))},
-		# 	'grid'    : {
-		# 		'kernel' : [gaussian_process.kernels.ConstantKernel(1.0, (1e-1, 1e3)) * gaussian_process.kernels.RBF(1.0, (1e-1, 1e3)), 
-		# 					gaussian_process.kernels.ConstantKernel(10.0, (1e-1, 1e3)) * gaussian_process.kernels.RBF(10.0, (1e-1, 1e3))],
-		# 	}},
+	seed = getattr(getattr(kwargs, 'args', None), 'seed', seed)
+	gridsearch_kwargs = {'refit': False, 'scoring': 'neg_median_absolute_error'}
+	bagging_kwargs    = {
+		'n_estimators' : 10,
+		'max_samples'  : 0.75,
+		'bootstrap'    : False,
+		'random_state' : seed,
 	}
 
-	# Filter MLP convergence warnings
-	if not sys.warnoptions:
-		warnings.simplefilter('ignore')
-		os.environ['PYTHONWARNINGS'] = 'ignore'
-
-	if False:
-		x_train = x_train[:,:len(get_sensor_bands(sensor, args))]
-		x_test  = x_test[:,:len(get_sensor_bands(sensor, args))]
-
 	if scale:
-		x_scaler = RobustScaler()
+		x_scaler = TransformerPipeline([AUCTransformer(list(get_sensor_bands(sensor))), RobustScaler()])
 		y_scaler = TransformerPipeline([LogTransformer(), MinMaxScaler((-1, 1))]) 
 		x_scaler.fit(x_train)
 		y_scaler.fit(y_train)
-		x_train = x_scaler.transform(x_train)
 		x_test  = x_scaler.transform(x_test)
-		y_train = y_scaler.transform(y_train)
+		x_train = x_scaler.transform(x_train)
+		y_train = y_scaler.transform(y_train).flatten()
 
-	if slices is None:
-		assert(y_test.shape[1] == y_train.shape[1]), 'Ambiguous y data provided - need to give slices parameter.'
-		slices = {product:slice(None)}
+	preprocess  = lambda m: m.fit(x_train.copy(), y_train.copy())
+	postprocess = None if not scale else y_scaler.inverse_transform
 
-	if gridsearch:
+	if verbose and gridsearch:
 		print('\nPerforming gridsearch...')
 
-	other = []
-	ests  = []
-	lbls  = []
-	for method, params in methods.items():
-		if gridsearch and method != 'SVM':
-			model = GridSearchCV(params['class'](), params['grid'], refit=False, n_jobs=3 if method != 'MDN' else 1, scoring='neg_median_absolute_error')
-			model.fit(x_train.copy(), y_train.copy().flatten())
+	other = {}
+	estim = {}
+	for method, params in models.items():
+		params['grid']['random_state'] = params['default']['random_state'] = seed
+		model_kwargs = params['default']
 
-			print(f'Best {method} params: {model.best_params_}')
-			model = params['class'](**model.best_params_)
+		with GlobalRandomManager(seed):
+			if gridsearch and method != 'SVM':
+				model = GridSearchCV(params['class'](), params['grid'], n_jobs=3 if method != 'MDN' else 1, **gridsearch_kwargs)
+				model.fit(x_train.copy(), y_train.copy())
 
-		else:
-			model = params['class'](**params['default'])
+				model_kwargs = model.best_params_
+				if verbose: print(f'Best {method} params: {model_kwargs}')
 
-		if bagging:
-			model = BaggingRegressor(model, n_estimators=10, max_samples=0.75, bootstrap=False)
-		model.fit(x_train.copy(), y_train.copy().flatten())
-		est_val = model.predict(x_test.copy()).flatten()
+			model = params['class'](**model_kwargs)
+			if bagging: model = BaggingRegressor(model, **bagging_kwargs)
 
-		if scale:
-			est_val = y_scaler.inverse_transform(est_val[:,None]).flatten()	
+			model.__name__ = method
+			estim[method]  = _create_estimates(model, x_test, postprocess, preprocess, verbose=verbose, **kwargs)
+			
+			if x_other is not None:
+				other[method] = _create_estimates(model, x_other, postprocess)
 
-		if not silent:
-			ins_val = y_test[:, slices[product]]
-			for i in range(ins_val.shape[1]):
-				print( performance(method, ins_val[:, i], est_val) )
-
-		ests.append(est_val[:,None])
-		lbls.append(method)
-
-		if x_other is not None:
-			est = model.predict(x_other.copy())
-			if scale: est = y_scaler.inverse_transform(est[:,None]).flatten()
-			other.append(est)
-
-	if not len(other):
-		return dict(zip(lbls, ests))
-	return dict(zip(lbls, ests)), dict(zip(lbls, other))
-
-
-def run_benchmarks(args, sensor, x_test, y_test, slices, silent=True, x_train=None, y_train=None, gridsearch=False, with_ml=False):
-	benchmarks = {}
-	for k in slices:
-		if k in ['chl', 'tss', 'a', 'aph', 'ap', 'ag', 'aph', 'adg', 'b', 'bbp']:
-			benchmarks.update( bench_product(sensor, x_test, y=y_test, slices=slices, silent=silent, args=args, product=k) )
-
-		if k in ['chl', 'tss'] and with_ml:
-			benchmarks.update( bench_ml(args, sensor, x_train, y_train, x_test, y_test, slices, silent, product=k, gridsearch=gridsearch) )
-	return benchmarks
-
-
-def print_benchmarks(*args, **kwargs):
-	run_benchmarks(*args, silent=False, **kwargs)
+	if len(other):
+		return estim, other
+	return estim

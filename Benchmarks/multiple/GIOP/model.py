@@ -28,7 +28,10 @@ Brandon Smith, NASA Goddard Space Flight Center, April 2018
 '''
 
 from ...chl.OC.model import model3 as OC3 
-from ...utils import get_required, optimize, loadtxt, to_rrs
+from ...utils import (
+	optimize, get_required, set_outputs, 
+	loadtxt, to_rrs, 
+)
 from ...meta import (
 	h0, h1, h2,
 	g0_Gordon as g0, 
@@ -40,8 +43,8 @@ from scipy.optimize import minimize
 import numpy as np 
 
 
-# Define any optimizable parameters
-@optimize([])
+@set_outputs(['chl', 'bbp', 'adg', 'aph', 'apg', 'a', 'b']) # Define the output product keys
+@optimize([]) # Define any optimizable parameters
 def model(Rrs, wavelengths, sensor, *args, independent=True, **kwargs):
 	''' 
 	With independent=False, there is a dependency between sample

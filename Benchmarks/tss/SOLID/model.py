@@ -3,7 +3,7 @@
 '''
 
 from ...utils import get_required, optimize, has_band, closest_wavelength, find_wavelength, to_rrs, loadtxt
-from ...other.QAA.model import model as QAA
+from ...multiple.QAA.model import model as QAA
 from ....product_estimation import apply_model as mdn_estimate
 
 from scipy.interpolate import CubicSpline as Interpolate
@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 
-model_hash = {
+sensor_hash = {
 	'MOD' : 'cd0c01156295ecdfdb838f27b838c339fb2ee52e135fdd1eebca1fa57cf2e203',
 	'MSI' : '684a3cee13d1135778a951ad12e94cfb46a8e1a940d7a70879c4d2ad015ad725',
 	'OLCI': 'f5ce0ea3fec891325a3b2ce648607a54fbe7185211108dac138ecd6dcb568e88',
@@ -34,7 +34,7 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 	sensor = sensor.replace('S2B','MSI').replace('MODA', 'MOD')
 	required, upper_band = params[sensor]
 
-	tol = kwargs.get('tol', 10) # allowable difference from the required wavelengths
+	tol = kwargs.get('tol', 11) # allowable difference from the required wavelengths
 	Rrs = get_required(Rrs, wavelengths, required, tol) # get values as a function: Rrs(443)
 
 	# Set default values for these parameters
@@ -57,7 +57,7 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 		'seed'      : 1234,
 		'silent'    : True, 
 		'model_loc' : Path(__file__).parent.resolve().joinpath('MDN_Model').as_posix(),
-		'model_hash': model_hash[sensor],
+		'model_hash': sensor_hash[sensor],
 	}
 
 	estimate = np.empty(type1.shape)
@@ -74,7 +74,7 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 	estimate[type2] = (a * bbp_665 ** b).flatten()[type2]
 
 	bbp = QAA(Rrs(None), wavelengths, sensor, *args, **kwargs)['bbp']
-	bbp_665 = get_required(bbp, wavelengths, [])(665)
+	bbp_665 = get_required(bbp, wavelengths, [], tol)(665)
 	estimate[type1] = (a * bbp_665 ** b).flatten()[type1]
 
 	return estimate

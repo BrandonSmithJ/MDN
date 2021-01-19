@@ -140,7 +140,7 @@ params = {
 
 def OC(Rrs, wavelengths, sensor, *args, algorithm='OC', num=3, **kwargs):
 	name = f'{algorithm}{num}{OC_PARAM[sensor] if sensor else ""}'.upper()
-	assert(name in params), 'Unknown algorithm "%s".' % name
+	assert(name in params), f'Unknown algorithm "{name}".'
 	
 	defaults, greens, blues = params[name]
 	req  = sorted(list(set(greens + blues)))

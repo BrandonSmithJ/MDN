@@ -20,7 +20,10 @@ the calculation of xi with the band difference in the exponent.
 the 555nm band of MODIS (which is a land-focused band). 
 '''
 
-from ...utils import get_required, optimize, loadtxt, to_rrs, closest_wavelength
+from ...utils import (
+	optimize, get_required, set_outputs, 
+	loadtxt, to_rrs, closest_wavelength,
+)
 from ...meta import (
 	h0, h1, h2,
 	g0_QAA as g0, 
@@ -32,20 +35,20 @@ from pathlib import Path
 import numpy as np
 
 
-# Define any optimizable parameters
-@optimize([])
-def model(Rrs, wavelengths, *args, lambda_reference=None, **kwargs):
+@set_outputs(['a', 'ap', 'ag', 'aph', 'apg', 'adg', 'b', 'bbp']) # Define the output product keys
+@optimize([]) # Define any optimizable parameters
+def model(Rrs, wavelengths, *args, **kwargs):
 	wavelengths = np.array(wavelengths)
 	required = [443, 490, 550, 670]
-	tol = kwargs.get('tol', 9) # allowable difference from the required wavelengths
+	tol = kwargs.get('tol', 11) # allowable difference from the required wavelengths
 	Rrs = get_required(Rrs, wavelengths, required, tol) # get values as a function: Rrs(443)
 	rrs = get_required(to_rrs(Rrs(None)), wavelengths, required, tol)
 
 	absorb  = Interpolate( *loadtxt('../IOP/aw').T  )
 	scatter = Interpolate( *loadtxt('../IOP/bbw').T )
 
-	get_band   = lambda k: closest_wavelength(k, wavelengths, tol=tol)
-	functional = lambda v: get_required(v, wavelengths)
+	get_band   = lambda k: closest_wavelength(k, wavelengths, tol=tol, validate=False)
+	functional = lambda v: get_required(v, wavelengths, [], tol)
 
 	# Invert rrs formula to find u
 	u = functional( (-g0 + (g0**2 + 4 * g1 * rrs(None)) ** 0.5) / (2 * g1) )
@@ -105,7 +108,7 @@ def model(Rrs, wavelengths, *args, lambda_reference=None, **kwargs):
 	xi   = np.exp(S * (get_band(443)-get_band(412))) 
 
 	# {a_g443, a_dg, a_ph} all require a 412nm band (thus are not available for e.g. OLI)
-	a_g443 =  (a(412) - zeta * a(443)) / (xi - zeta) \
+	a_g443 =  (a(get_band(412)) - zeta * a(443)) / (xi - zeta) \
 			- (absorb(get_band(412)) - zeta * absorb(get_band(443))) / (xi - zeta)
 
 	a_dg = a_g443 * np.exp(S * (get_band(443) - wavelengths))
@@ -119,11 +122,6 @@ def model(Rrs, wavelengths, *args, lambda_reference=None, **kwargs):
 	a_p = 0.63 * b ** 0.88
 	a_g = a(None) - absorb(get_band(443)) - a_p  
 	
-	if lambda_reference is not None:
-		return  functional(b)(lambda_reference),    \
-				functional(a_ph)(lambda_reference), \
-				functional(a_g)(lambda_reference), eta, S
-
 	# Return all backscattering and absorption parameters
 	return {
 		'a'  : a(None),
