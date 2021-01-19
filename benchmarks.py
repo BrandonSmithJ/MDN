@@ -54,7 +54,16 @@ def run_benchmarks(sensor, x_test, y_test=None, x_train=None, y_train=None, slic
 					*, product='chl', bands=None, verbose=False, 
 					return_rs=True, return_ml=False, return_opt=False,
 					kwargs_rs={},   kwargs_ml={},    kwargs_opt={}):
-	
+	''' Run all available benchmark algorithms on the given data. 
+		- return_rs : Include remote sensing (domain) algorithms in the returned dictionary
+		- return_ml : Include machine learning algorithms in the returned dictionary (must
+		              pass x_train, y_train variables to the function)
+		- return_opt: Include remote sensing (domain) algorithms that allow for optimization
+		              in the returned dictionary (must pass x_train, y_train variables)
+
+		The returned object is a nested dictionary with format:
+			{product: {algorithm: estimates, ...}, ...}
+	'''
 	def assert_same_features(a, b, label):
 		assert(a is None or b is None or a.shape[1] == b.shape[1]), \
 			f'Differing number of {label} features: {a.shape[1]} vs {b.shape[1]}'
