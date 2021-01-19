@@ -27,7 +27,7 @@ chlor_a   = estimates[0]
 
 # Or, with just random data:
 import numpy as np 
-rand_data = [np.random.rand(3,3) for band in get_sensor_bands(sensor)]
+rand_data = np.dstack([np.random.rand(3,3) for band in get_sensor_bands(sensor)])
 estimates = image_estimates(rand_data, sensor=sensor)
 chlor_a   = estimates[0]
 ```
