@@ -1,0 +1,50 @@
+Created: 2021-01-19 14:59:54.293831
+Version: 1.1.0
+--------------
+align: None
+batch: 128
+benchmark: False
+epsilon: 0.001
+imputations: 5
+l2: 0.001
+lr: 0.001
+model_lbl: 
+n_hidden: 100
+n_iter: 10000
+n_layers: 5
+n_mix: 5
+no_bagging: False
+product: chl
+sat_bands: False
+seed: 42
+sensor: HICO
+use_boosting: False
+use_noise: False
+use_ratio: False
+use_tchlfix: False
+x_scalers: [('RobustScaler', [], {})]
+y_scalers: [('LogTransformer', [], {}), ('MinMaxScaler', [(-1, 1)], {})]
+--------------
+animate: False
+avg_est: False
+darktheme: False
+data_loc: D:/Data/Test
+data_wavelengths: [409, 415, 421, 426, 432, 438, 444, 449, 455, 461, 467, 472, 478, 484, 490, 495, 501, 507, 512, 518, 524, 530, 535, 541, 547, 553, 558, 564, 570, 575, 581, 587, 593, 598, 604, 610, 616, 621, 627, 633, 638, 644, 650, 656, 661, 667, 673, 679, 684, 690, 696, 701, 707, 713, 719, 724, 730, 736, 742, 747, 753, 759, 764, 770, 776, 782, 787]
+data_xtrain_shape: (3500, 67)
+data_ytrain_shape: (3500, 1)
+dataset: all
+datasets_hash: e91a23a96ab1ef070aa712557e47d8ff70a6227ea73dffead94af321f8bbe345
+filename: None
+model_loc: Model
+n_redraws: 50
+n_rounds: 10
+no_load: False
+no_save: False
+plot_loss: False
+save_data: False
+save_stats: False
+silent: False
+sim_loc: D:/Data/Train
+threshold: None
+use_sim: False
+verbose: False
