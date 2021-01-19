@@ -144,7 +144,6 @@ def _bench_ml(sensor, x_train, y_train, x_test, *, x_other=None, verbose=False,
 	from sklearn.model_selection import GridSearchCV
 	from sklearn.ensemble import BaggingRegressor
 	from .Benchmarks.ML import models 
-	from .transformers import AUCTransformer
 
 	seed = getattr(getattr(kwargs, 'args', None), 'seed', seed)
 	gridsearch_kwargs = {'refit': False, 'scoring': 'neg_median_absolute_error'}
@@ -156,7 +155,7 @@ def _bench_ml(sensor, x_train, y_train, x_test, *, x_other=None, verbose=False,
 	}
 
 	if scale:
-		x_scaler = TransformerPipeline([AUCTransformer(list(get_sensor_bands(sensor))), RobustScaler()])
+		x_scaler = TransformerPipeline([RobustScaler()])
 		y_scaler = TransformerPipeline([LogTransformer(), MinMaxScaler((-1, 1))]) 
 		x_scaler.fit(x_train)
 		y_scaler.fit(y_train)
