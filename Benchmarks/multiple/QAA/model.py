@@ -40,7 +40,7 @@ import numpy as np
 def model(Rrs, wavelengths, *args, **kwargs):
 	wavelengths = np.array(wavelengths)
 	required = [443, 490, 550, 670]
-	tol = kwargs.get('tol', 11) # allowable difference from the required wavelengths
+	tol = kwargs.get('tol', 21) # allowable difference from the required wavelengths
 	Rrs = get_required(Rrs, wavelengths, required, tol) # get values as a function: Rrs(443)
 	rrs = get_required(to_rrs(Rrs(None)), wavelengths, required, tol)
 
