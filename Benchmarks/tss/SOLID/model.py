@@ -34,7 +34,7 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 	sensor = sensor.replace('S2B','MSI').replace('MODA', 'MOD')
 	required, upper_band = params[sensor]
 
-	tol = kwargs.get('tol', 11) # allowable difference from the required wavelengths
+	tol = kwargs.get('tol', 21) # allowable difference from the required wavelengths
 	Rrs = get_required(Rrs, wavelengths, required, tol) # get values as a function: Rrs(443)
 
 	# Set default values for these parameters
