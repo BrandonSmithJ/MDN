@@ -12,6 +12,10 @@ The package can be cloned into a directory with:
 
 `git clone https://github.com/BrandonSmithJ/MDN`
 
+Alternatively, you may use pip to install:
+
+`pip install git+https://github.com/BrandonSmithJ/MDN`
+
 <br>
 
 The code may then either be used as a library, such as with the following:
