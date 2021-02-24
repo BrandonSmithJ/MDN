@@ -13,12 +13,12 @@ class CustomTransformer(TransformerMixin):
 
 	def fit(self, X, *args, **kwargs):				 
 		self._input_shape = X.shape[1]
-		return self._fit(X, *args, **kwargs)
+		return self._fit(X.copy(), *args, **kwargs)
 
 	def transform(self, X, *args, **kwargs):
 		if self._input_shape is not None:
 			assert(X.shape[1] == self._input_shape), f'Number of data features changed: {self._input_shape} vs {X.shape[1]}'
-		X = self._transform(X, *args, **kwargs)
+		X = self._transform(X.copy(), *args, **kwargs)
 		
 		if self._output_shape is not None:
 			assert(X.shape[1] == self._output_shape), f'Number of data features changed: {self._output_shape} vs {X.shape[1]}'
@@ -28,7 +28,7 @@ class CustomTransformer(TransformerMixin):
 	def inverse_transform(self, X, *args, **kwargs):
 		if self._output_shape is not None:
 			assert(X.shape[1] == self._output_shape), f'Number of data features changed: {self._output_shape} vs {X.shape[1]}'
-		X = self._inverse_transform(X, *args, **kwargs)
+		X = self._inverse_transform(X.copy(), *args, **kwargs)
 		
 		if self._input_shape is not None:
 			assert(X.shape[1] == self._input_shape), f'Number of data features changed: {self._input_shape} vs {X.shape[1]}'
