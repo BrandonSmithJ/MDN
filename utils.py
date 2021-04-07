@@ -1,6 +1,5 @@
-from .transformers import CustomUnpickler, RatioTransformer, ColumnTransformer
 from .meta import get_sensor_bands, SENSOR_BANDS, ANCILLARY, PERIODIC
-from .parameters import update, hypers
+from .parameters import update, hypers, flags
 from .__version__ import __version__
 
 from collections import defaultdict as dd
@@ -25,13 +24,16 @@ def ignore_warnings(func):
 
 def find_wavelength(k, waves, validate=True, tol=5):
 	''' Index of closest wavelength '''
-	i = np.abs(np.array(waves) - k).argmin() 
-	assert(not validate or (abs(k-waves[i]) <= tol)), f'Needed {k}nm, but closest was {waves[i]}nm in {waves}'
-	return i 
+	waves = np.array(waves)
+	w = np.atleast_1d(k)
+	i = np.abs(waves - w[:, None]).argmin(1) 
+	assert(not validate or (np.abs(w-waves[i]).max() <= tol)), f'Needed {k}, but closest was {waves[i]} in {waves} ({np.abs(w-waves[i]).max()} > {tol})'
+	return i.reshape(np.array(k).shape)
 
 
 def closest_wavelength(k, waves, validate=True, tol=5): 
 	''' Value of closest wavelength '''
+	waves = np.array(waves)
 	return waves[find_wavelength(k, waves, validate, tol)]	
 
 
@@ -91,6 +93,7 @@ def store_pkl(filename, output):
 
 def read_pkl(filename):
 	''' Helper to read pickle file '''
+	from .transformers import CustomUnpickler
 	with Path(filename).open('rb') as f:
 		return CustomUnpickler(f).load()
 
@@ -120,6 +123,7 @@ def using_feature(args, flag):
 	becomes
 		signal = using_feature(args, 'ratio') # if true, we add ratios  
 	'''
+	flag = flag.replace('use_', '').replace('no_', '')
 	assert(hasattr(args,f'use_{flag}') or hasattr(args, f'no_{flag}')), f'"{flag}" flag not found'
 	return getattr(args, f'use_{flag}', False) or not getattr(args, f'no_{flag}', True)
 
@@ -240,6 +244,12 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 	return bands, np.dstack([data[f] for f in features])
 
 
+
+
+
+
+
+
 def generate_config(args, create=True, verbose=True):
 	''' 
 	Create a config file for the current settings, and store in
@@ -256,20 +266,32 @@ def generate_config(args, create=True, verbose=True):
 		if args.verbose: print(f'Using manually set model hash: {args.model_hash}')
 		return root.joinpath(args.model_hash)
 
+	# Hash is always dependent upon these values
 	dependents = [getattr(act, 'dest', '') for group in [hypers, update] for act in group._group_actions]
 	dependents+= ['x_scalers', 'y_scalers']
 
-	config = [f'Version: {__version__}']
+	# Hash is only partially dependent upon these values, assuming operation changes when using a feature
+	#  - 'use_' flags being set cause dependency
+	#  - 'no_'  flags being set remove dependency
+	# This allows additional flags to be added without breaking prior model compatibility
+	partials = [getattr(act, 'dest', '') for group in [flags] for act in group._group_actions]
+
+	config = [f'Version: {__version__}', '', 'Dependencies']
 	config+= [''.join(['-']*len(config[-1]))]
-	others = [''.join(['-']*len(config[-1]))]
+	others = ['', 'Configuration']
+	others+= [''.join(['-']*len(others[-1]))]
 
 	for k,v in sorted(args.__dict__.items(), key=lambda z: z[0]):
-		if k in ['x_scalers', 'y_scalers']:
-			v = [(s[0].__name__,)+s[1:] for s in v] # stringify scaler and its arguments
+		if k in ['x_scalers', 'y_scalers']: 
+			cinfo = lambda s, sarg, skw: getattr(s, 'config_info', lambda *a, **k: '')(*sarg, **skw)
+			cfmt  = lambda *cargs: f' # {cinfo(*cargs)}' if cinfo(*cargs) else '' 
+			v = '\n\t' + '\n\t'.join([f'{(s[0].__name__,) + s[1:]}{cfmt(*s)}' for s in v]) # stringify scaler and its arguments
+		
+		if k in partials and using_feature(args, k): 
+			                     config.append(f'{k:<18}: {v}')
+		elif k in dependents:    config.append(f'{k:<18}: {v}')
+		else:                    others.append(f'{k:<18}: {v}') 
 
-		if k in dependents: config.append(f'{k}: {v}') 
-		else:               others.append(f'{k}: {v}') 
-				
 	config = '\n'.join(config) # Model is dependent on some arguments, so they change the hash
 	others = '\n'.join(others) # Other arguments are stored for replicability
 	ver_re = r'(Version\: \d+\.\d+)(?:\.\d+\n[-]+\n)' # Match major/minor version within subgroup, patch/dashes within pattern
@@ -314,65 +336,76 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 												 [bbp443, bbp483, bbp561, bbp655, chl], 
 											 	 {'bbp':slice(0,4), 'chl':slice(4,5)}
 	'''
-	def loadtxt(name, loc, _wavelengths): 
+	def loadtxt(name, loc, required_wvl): 
 		''' Error handling wrapper over np.loadtxt, with the addition of wavelength selection'''
 		dloc = Path(loc).joinpath(f'{name}.csv')
-
+		
 		# TSS / TSM are synonymous
 		if 'tss' in name and not dloc.exists():
 			dloc = Path(loc).joinpath(f'{name.replace("tss","tsm")}.csv')
 
-		# CDOM is just an alias for a_cdom(443)
+		# CDOM is just an alias for a_cdom(443) or a_g(443)
 		if 'cdom' in name and not dloc.exists():
 			dloc = Path(loc).joinpath('ag.csv')
+			required_wvl = [443]
 
 		try:
+			required_wvl = np.array(required_wvl).flatten()
 			assert(dloc.exists()), (f'Key {name} does not exist at {loc} ({dloc})') 
+
 			data = np.loadtxt(dloc, delimiter=',', dtype=float if name not in ['../Dataset', '../meta'] else str, comments=None)
-			if len(data.shape) == 1:
-				data = data[:, None]
+			if len(data.shape) == 1: data = data[:, None]
 
 			if data.shape[1] > 1 and data.dtype.type is not np.str_:
 
 				# If we want to get all data, regardless of if bands are available...
 				if allow_missing:
-					new_data = [[np.nan]*len(data)] * len(_wavelengths)
-					wvls  = np.loadtxt(Path(loc).joinpath(f'{name}_wvl.csv'), delimiter=',')[:,None]
-					idxs  = np.abs(wvls - np.atleast_2d(_wavelengths)).argmin(0)
-					valid = np.abs(wvls - np.atleast_2d(_wavelengths)).min(0) < 2
+					new_data = [[np.nan]*len(data)] * len(required_wvl)
+					wvls  = np.loadtxt(Path(loc).joinpath(f'{dloc.stem}_wvl.csv'), delimiter=',')[:,None]
+					idxs  = np.abs(wvls - np.atleast_2d(required_wvl)).argmin(0)
+					valid = np.abs(wvls - np.atleast_2d(required_wvl)).min(0) < 2
 
 					for j, (i, v) in enumerate(zip(idxs, valid)):
-						# print(j, i, v)
 						if v: new_data[j] = data[:, i]
 					data = np.array(new_data).T
 				else:
-					data = data[:, get_valid(name, loc, _wavelengths)]
+					data = data[:, get_valid(dloc.stem, loc, required_wvl)]
 
 			if 'cdom' in name and dloc.stem == 'ag':
-				data = data[:, find_wavelength(443, np.loadtxt(Path(loc).joinpath(f'{dloc.stem}_wvl.csv'), delimiter=','))].flatten()[:, None]
+				data = data[:, find_wavelength(443, required_wvl)].flatten()[:, None]
 			return data 
 		except Exception as e:
-			# assert(0),e
-			if dloc.exists():
-				print(f'Error fetching {name} from {loc}: {e}')
 			if name not in ['Rrs']:# ['../chl', '../tss', '../cdom']:
+				if dloc.exists():
+					print(f'\n\tError fetching {name} from {loc}:\n{e}')
 				return np.array([]).reshape((0,0))
-			assert(0), e
+			raise e
 
-	def get_valid(name, loc, _wavelengths, margin=2):
-		''' Dataset at <loc> must have all bands in <_wavelengths> within <margin>nm '''
+	def get_valid(name, loc, required_wvl, margin=2):
+		''' Dataset at <loc> must have all bands in <required_wvl> within <margin>nm '''
 		if 'HYPER' in str(loc): margin=1
 
-		wvls = np.loadtxt(Path(loc).joinpath(f'{name}_wvl.csv'), delimiter=',')[:,None]
-		assert(np.all([np.abs(wvls-w).min() <= margin for w in _wavelengths])), (
-			f'{loc} is missing wavelengths: \n{_wavelengths} needed,\n{wvls.flatten()} found')
-		
-		if len(wvls) != len(_wavelengths):
-			valid = np.abs(wvls - np.atleast_2d(_wavelengths)).min(1) < margin
-			assert(valid.sum() == len(_wavelengths)), [wvls[valid].flatten(), _wavelengths]
-			return valid 
-		return np.array([True] * len(_wavelengths))
+		# First, validate all required wavelengths are within the margin of an available wavelength
+		wvls  = np.loadtxt(Path(loc).joinpath(f'{name}_wvl.csv'), delimiter=',')[:,None]
+		check = np.array([np.abs(wvls-w).min() <= margin for w in required_wvl])
+		assert(check.all()), '\n\t\t'.join([
+			f'{name} is missing {(~check).sum()} wavelengths:',
+			f'Needed  {required_wvl}', f'Found   {wvls.flatten()}', 
+			f'Missing {required_wvl[~check]}', ''])
 
+		# First, validate available wavelengths are within the margin of the required wavelengths
+		valid = np.array([True] * len(required_wvl))
+		if len(wvls) != len(required_wvl):
+			valid = np.abs(wvls - np.atleast_2d(required_wvl)).min(1) < margin
+			assert(valid.sum() == len(required_wvl)), [wvls[valid].flatten(), required_wvl]
+
+		# Then, ensure the order of the available wavelengths are the same as the required
+		if not all([w1 == w2 for w1,w2 in zip(wvls[valid], required_wvl)]):
+			valid = [np.abs(wvls.flatten() - w).argmin() for w in required_wvl]
+			assert(len(np.unique(valid)) == len(valid) == len(required_wvl)), [valid, wvls[valid].flatten(), required_wvl]
+		return valid 
+
+	locs = [Path(loc).resolve() for loc in np.atleast_1d(locs)]
 	print('\n-------------------------')
 	print(f'Loading data for sensor {locs[0].parts[-1]}')
 	if allow_missing:
@@ -381,13 +414,13 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 	x_data = []
 	y_data = []
 	l_data = []
-	for loc in np.atleast_1d(locs):
+	for loc in locs:
 		try:
 			loc_data = [loadtxt(key, loc, wavelengths) for key in keys]
 			print(f'\tN={len(loc_data[0]):>5} | {loc.parts[-1]} / {loc.parts[-2]} ({[np.isfinite(ld).all(1).sum() for ld in loc_data[1:]]})')
 			assert(all([len(l) in [len(loc_data[0]), 0] for l in loc_data])), dict(zip(keys, map(np.shape, loc_data)))
 
-			if all([l.shape[1] == 0 for l in loc_data[1:]]):
+			if all([l.shape[1] == 0 for l in loc_data[(1 if len(loc_data) > 1 else 0):]]):
 				print(f'Skipping dataset {loc}: missing all features')
 				continue
 
@@ -398,9 +431,10 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 		except Exception as e:
 			# assert(0), e
 			# Allow invalid datasets if there are multiple to be fetched
-			print(f'Error {loc}: {e}')
+			print(f'\nError fetching {loc}:\n\t{e}')
 			if len(np.atleast_1d(locs)) == 1:
 				raise e
+
 	assert(len(x_data) > 0 or len(locs) == 0), 'No datasets are valid with the given wavelengths'
 	assert(all([x.shape[1] == x_data[0].shape[1] for x in x_data])), f'Differing number of {keys[0]} wavelengths: {[x.shape for x in x_data]}'
 
@@ -430,9 +464,11 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 	# Combine everything together
 	l_data = np.vstack(l_data)
 	x_data = np.vstack(x_data)
-	y_data = np.vstack([np.hstack(y) for y in y_data])
-	assert(slices[-1] == y_data.shape[1]), [slices, y_data.shape]
-	assert(y_data.shape[0] == x_data.shape[0]), [x_data.shape, y_data.shape]
+
+	if len(keys) > 0:
+		y_data = np.vstack([np.hstack(y) for y in y_data])
+		assert(slices[-1] == y_data.shape[1]), [slices, y_data.shape]
+		assert(y_data.shape[0] == x_data.shape[0]), [x_data.shape, y_data.shape]
 	slices = {k.replace('../','') : slice(slices[i], s) for i,(k,s) in enumerate(zip(keys, slices[1:]))}
 	print(f'\tTotal prior to filtering: {len(x_data)}')
 
@@ -502,6 +538,7 @@ def _filter_invalid(x_data, y_data, slices, allow_nan_inp=False, allow_nan_out=F
 	both_data  = [x_data, y_data]
 	set_length = [len(fullset) for fullset in both_data]
 	set_shape  = [[len(subset) for subset in fullset] for fullset in both_data]
+
 	assert(np.all([length == len(x_data) for length in set_length])), \
 		f'Mismatching number of subsets: {set_length}'
 	assert(np.all([[shape == len(fullset[0]) for shape in shapes] 
@@ -535,7 +572,7 @@ def _filter_invalid(x_data, y_data, slices, allow_nan_inp=False, allow_nan_out=F
 def get_data(args):
 	''' Main function for gathering datasets '''
 	np.random.seed(args.seed)
-	sensor   = args.sensor.split('-')[0]
+	sensor   = args.sensor.split('-')[0]+(('-'+args.sensor.split('-')[-1]) if '-' in args.sensor and args.sensor.split('-')[-1][0] == 'S' else '')
 	products = args.product.split(',')
 	bands    = get_sensor_bands(args.sensor, args)
 
@@ -572,7 +609,7 @@ def get_data(args):
 					datasets = [d for d in datasets if d not in ['PACE']]
 				
 				if product == '../chl':
-					datasets = [d for d in datasets if d not in ['Arctic']] # Bunkei contained within sundar's set
+					datasets = [d for d in datasets if d not in ['Arctic']]
 				
 			data_folder += datasets
 			data_keys   += [product]
@@ -607,7 +644,7 @@ def get_data(args):
 		y_data = [y_data] + y_align
 
 	# if -nan IS in the sensor label: do not filter samples; allow all, regardless of nan composition
-	if '-nan' not in args.sensor: 
+	if '-nan' not in args.sensor:
 		(x_data, *_), (y_data, *_), (sources, *_) = _filter_invalid(x_data, y_data, slices, other=[sources], allow_nan_out=len(data_keys) > 2)
 			
 	print('\nFinal counts:')

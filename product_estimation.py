@@ -11,7 +11,7 @@ from .metrics import performance
 from .plot_utils import plot_scatter
 from .benchmarks import run_benchmarks
 from .parameters import get_args
-from .transformers import TransformerPipeline, LogTransformer, RatioTransformer, BaggingColumnTransformer
+from .transformers import TransformerPipeline, generate_scalers
 
 
 def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, output_slices=None, dataset_labels=None):
@@ -19,36 +19,10 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 	Estimate all target variables for the given x_test. If a model doesn't 
 	already exist, creates a model with the given training data. 
 	'''		
-	wavelengths  = get_sensor_bands(args.sensor, args)
-	store_scaler = lambda scaler, args=[], kwargs={}: (scaler, args, kwargs)
-
-	# Note that additional x_scalers are added to the beginning of the pipeline (e.g. Robust( bagging( ratio(x) ) ))
-	args.x_scalers = [
-			store_scaler(preprocessing.RobustScaler),
-	]
-	args.y_scalers = [
-		store_scaler(LogTransformer),
-		store_scaler(preprocessing.MinMaxScaler, [(-1, 1)]),
-	]
-
-	# We only want bagging to be applied to the columns if there are a large number of feature (e.g. ancillary features included) 
-	many_features = any(x is not None and (x.shape[1]-len(wavelengths)) > 15 for x in [x_train, x_test])
-
-	# Add bagging to the columns (use a random subset of columns, excluding the first <n_wavelengths> columns from the process)
-	if using_feature(args, 'bagging') and (using_feature(args, 'ratio') or many_features):
-		n_extra = 0 if not using_feature(args, 'ratio') else RatioTransformer.n_features # Number of ratio features added
-		args.x_scalers = [
-			store_scaler(BaggingColumnTransformer, [len(wavelengths)], {'n_extra':n_extra}),
-		] + args.x_scalers
-	
-	# Add additional features to the inputs
-	if using_feature(args, 'ratio'):
-		args.x_scalers = [
-			store_scaler(RatioTransformer, [list(wavelengths)]),
-		] + args.x_scalers
+	# Add x/y scalers to the args object
+	generate_scalers(args, x_train, x_test)
 
 	# Add a few additional variables to be stored in the generated config file
-	setattr(args, 'data_wavelengths', list(wavelengths))
 	if x_train is not None: setattr(args, 'data_xtrain_shape', x_train.shape)
 	if y_train is not None: setattr(args, 'data_ytrain_shape', y_train.shape)
 	if x_test  is not None: setattr(args, 'data_xtest_shape',  x_test.shape)
@@ -112,7 +86,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 
 			# To speed up the process and limit memory consumption, apply the trained model to the given test data in chunks
 			for i in trange(0, len(x_test), chunk_size, disable=not args.verbose):
-				est = model.predict(x_test[i:i+chunk_size], confidence_interval=None)
+				est = model.predict(x_test[i:i+chunk_size], confidence_interval=getattr(args, 'CI', None))
 				partial_est.append( np.array(est, ndmin=3) )
 
 			estimates.append( np.hstack(partial_est) )
@@ -120,7 +94,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 
 			if args.verbose and y_test is not None:
 				median = np.median(np.stack(estimates, axis=1)[0], axis=0)
-				labels = get_labels(wavelengths, output_slices, n_out=y_test.shape[1])
+				labels = get_labels(args.data_wavelengths, output_slices, n_out=y_test.shape[1])
 				for lbl, y1, y2 in zip(labels, y_test.T, median.T):
 					print( performance(f'{lbl:>7s} Median', y1, y2) )
 				print(f'--- Done round {round_num} ---\n')
@@ -129,6 +103,8 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 	# estimates) if a confidence_interval within (0,1) is passed into model.predict 
 	if x_test is not None:
 		estimates, *confidence_bounds = np.stack(estimates, axis=1)
+		if len(confidence_bounds):
+			return estimates, model.output_slices, confidence_bounds
 	return estimates, model.output_slices
 
 
@@ -193,29 +169,42 @@ def apply_model(x_test, use_cmdline=True, **kwargs):
 	return np.median(preds, 0), idxs
 	
 
+def print_dataset_stats(**kwargs):
+	''' Print datasets shape & min / max stats per feature '''
+	label = kwargs.pop('label', '')
+	for k, arr in kwargs.items():
+		print(f'\n{label} {k.title()}'.strip()+'\n\t'.join(['']+[f'{k}: {v}' for k, v in {
+			'Shape'   : arr.shape,
+			'N Valid' : getattr(np.isfinite(arr).sum(0), 'min' if arr.shape[1] > 10 else 'tolist')(),
+			'Min,Max' : list(zip(np.nanmin(arr, 0).round(2), np.nanmax(arr, 0).round(2))),
+		}.items()]))
+
+
 def main():
 	args = get_args()
 
 	# If a file was given, estimate the product for the Rrs contained within
 	if args.filename:
 		filename = Path(args.filename)
-		assert(filename.exists()), (
-			f'Expecting path to in situ data as the passed argument, but "{filename}" does not exist.')
+		assert(filename.exists()), f'Expecting "{filename}" to be path to Rrs data, but it does not exist.'
 
-		x_test = np.loadtxt(args.filename, delimiter=',')
-		print(f'Min Rrs: {x_test.min(0)}')
-		print(f'Max Rrs: {x_test.max(0)}')
+		bands = get_sensor_bands(args.sensor, args)
+		if filename.is_file(): x_test = np.loadtxt(args.filename, delimiter=',')
+		else:                  x_test, *_ = _load_datasets(['Rrs'], [filename], bands)
+
 		print(f'Generating estimates for {len(x_test)} data points ({x_test.shape})')
-		preds, idxs = get_estimates(args, x_test=x_test)
-		print(f'Min: {np.median(preds, 0).min(0)}')
-		print(f'Max: {np.median(preds, 0).max(0)}')
+		print_dataset_stats(rrs=x_test, label='Input')
 
-		labels = get_labels(get_sensor_bands(args.sensor, args), idxs, preds[0].shape[1])
-		preds  = np.append(np.array(labels)[None,:], np.median(preds, 0), 0)
+		estimates, slices = get_estimates(args, x_test=x_test)
+		estimates = np.median(estimates, 0)
+		print_dataset_stats(estimates=estimates, label='MDN')
 
-		filename = filename.parent.joinpath(f'MDN_{filename.stem}.csv').as_posix()
+		labels    = get_labels(bands, slices, estimates.shape[1])
+		estimates = np.append([labels], estimates, 0).astype(str)
+		filename  = filename.parent.joinpath(f'MDN_{filename.stem}.csv').as_posix()
+		
 		print(f'Saving estimates at location "{filename}"')
-		np.savetxt(filename, preds.astype(str), delimiter=',', fmt='%s')
+		np.savetxt(filename, estimates, delimiter=',', fmt='%s')
 
 	# Save data used with the given args
 	elif args.save_data:
@@ -224,13 +213,14 @@ def main():
 		valid  = np.any(np.isfinite(x_data), 1)
 		x_data = x_data[valid].astype(str)
 		y_data = y_data[valid].astype(str)
-		locs   = np.array(locs).T[valid].astype(str)
+		locs   = np.array(locs)[valid].astype(str)
 		wvls   = list(get_sensor_bands(args.sensor, args).astype(int).astype(str))
 		lbls   = get_labels(get_sensor_bands(args.sensor, args), slices, y_data.shape[1])
 		data   = np.append([wvls], x_data.astype(str), 0)
 		data_full = np.append(np.append(locs, x_data, 1), y_data, 1)
-		data_full = np.append([['index', 'dataset']+wvls+lbls], data_full, 0)
+		data_full = np.append([['dataset', 'index']+wvls+lbls], data_full, 0)
 		np.savetxt(f'{args.sensor}_data_full.csv', data_full, delimiter=',', fmt='%s')
+		print(f'Saved data with shape {data_full.shape}')
 
 	# Train a model with partial data, and benchmark on remaining
 	elif args.benchmark:

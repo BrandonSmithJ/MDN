@@ -146,7 +146,7 @@ class MDN(object):
 				raise Exception('Model exists, but no_load is set and no training data was given.')
 
 			elif X is not None and y is not None:
-				self.scalerx.fit( self._ensure_format(X) )
+				self.scalerx.fit( self._ensure_format(X), self._ensure_format(y) )
 				self.scalery.fit( self._ensure_format(y) )
 
 				# Gather all data (train, validation, test, ...) into singular object
@@ -173,6 +173,7 @@ class MDN(object):
 				raise Exception(f"No trained model exists at: \n{self.model_path}")
 			self.graph.finalize()
 		return self 
+
 
 	@ignore_warnings
 	def predict(self, X, confidence_interval=None, threshold=None):

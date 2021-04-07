@@ -1,6 +1,4 @@
-from .meta import SENSOR_LABEL
 import argparse
-
 
 parser = argparse.ArgumentParser(epilog="""
 	Passing a filename will estimate the desired parameter from the Rrs 
@@ -10,17 +8,17 @@ parser = argparse.ArgumentParser(epilog="""
 
 parser.add_argument("filename",    nargs  ="?",          help="CSV file containing Rrs values to estimate from")
 parser.add_argument("--model_loc", default="Model",      help="Location of trained models")
-# parser.add_argument("--data_loc",  default="/media/brandon/NASA/Data/Test",  help="Location of in situ data")
-# parser.add_argument("--sim_loc",   default="/media/brandon/NASA/Data/Train", help="Location of simulated data")
-parser.add_argument("--data_loc",  default="D:/Data/Test",  help="Location of in situ data")
-parser.add_argument("--sim_loc",   default="D:/Data/Train", help="Location of simulated data")
+# parser.add_argument("--data_loc",  default="/media/brandon/NASA/Data/Insitu",  help="Location of in situ data")
+# parser.add_argument("--sim_loc",   default="/media/brandon/NASA/Data/Simulated", help="Location of simulated data")
+parser.add_argument("--data_loc",  default="D:/Data/Insitu",    help="Location of in situ data")
+parser.add_argument("--sim_loc",   default="D:/Data/Simulated", help="Location of simulated data")
 parser.add_argument("--n_redraws", default=50,     type=int,   help="Number of plot redraws during training (i.e. updates plot every n_iter / n_redraws iterations); only used with --plot_loss.")
 parser.add_argument("--n_rounds",  default=10,     type=int,   help="Number of models to fit, with median output as the final estimate")
 
 
 ''' Flags '''
-parser.add_argument("--threshold", default=None,   type=float, help="Output the maximum prior estimate when the prior is above this threshold, and the weighted average estimate otherwise. Set to None, thresholding is not used.")
-parser.add_argument("--avg_est",   action ="store_true", help="Use the prior probability weighted mean as the estimate. Otherwise, use maximum prior.")
+parser.add_argument("--threshold", default=None,   type=float, help="Output the maximum prior estimate when the prior is above this threshold, and the weighted average estimate otherwise. Set to None, thresholding is not used")
+parser.add_argument("--avg_est",   action ="store_true", help="Use the prior probability weighted mean as the estimate; otherwise, use maximum prior")
 parser.add_argument("--no_save",   action ="store_true", help="Do not save the model after training")
 parser.add_argument("--no_load",   action ="store_true", help="Do load a saved model (and overwrite, if not no_save)")
 parser.add_argument("--verbose",   action ="store_true", help="Verbose output printing")
@@ -37,33 +35,41 @@ update = parser.add_argument_group('Model Parameters', 'Parameters which require
 update.add_argument("--sat_bands", action ="store_true", help="Use bands specific to certain products when utilizing satellite retrieved spectra")
 update.add_argument("--benchmark", action ="store_true", help="Train only on partial dataset, and use remaining to benchmark")
 update.add_argument("--product",   default="chl",        help="Product to estimate")
-update.add_argument("--sensor",    default="OLI",        help="Sensor to estimate from", choices=SENSOR_LABEL)
-update.add_argument("--align",     default=None,         help="Comma-separated list of sensors to align data with. Passing \"all\" uses all sensors.", choices=['all']+list(SENSOR_LABEL))
+update.add_argument("--sensor",    default="OLI",        help="Sensor to estimate from (See meta.py for available options)")
+update.add_argument("--align",     default=None,         help="Comma-separated list of sensors to align data with; passing \"all\" uses all sensors (See meta.py for available options)")
 update.add_argument("--model_lbl", default="",      	 help="Label for a model")
 update.add_argument("--seed",      default=42,   type=int,   help="Random seed")
 
 
 ''' Flags which have a yet undecided default value '''
-# update.add_argument("--no_noise",  action ="store_true", help="Do not add noise when training the model")
-update.add_argument("--use_noise", action ="store_true", help="Add noise when training the model")
+flags = parser.add_argument_group('Model Flags', 'Flags which require a new model to be trained if they are changed')
 
-# update.add_argument("--no_ratio",  action ="store_true", help="Do not add band ratios as input features")
-update.add_argument("--use_ratio", action ="store_true", help="Add band ratios as input features")
+# flags.add_argument("--no_noise",  action ="store_true", help="Do not add noise when training the model")
+flags.add_argument("--use_noise",     action ="store_true", help="Add noise when training the model")
 
-update.add_argument("--use_tchlfix",  action ="store_true", help="Correct chl for pheopigments")
-# update.add_argument("--no_tchlfix", action ="store_true", help="Do not correct chl for pheopigments")
+# flags.add_argument("--no_ratio",  action ="store_true", help="Do not add band ratios as input features")
+flags.add_argument("--use_ratio",     action ="store_true", help="Add band ratios as input features")
 
-# parser.add_argument("--no_cache",  action ="store_true", help="Do not use any cached data")
-# parser.add_argument("--use_cache", action ="store_true", help="Use cached data, if available")
+flags.add_argument("--use_auc",       action ="store_true", help="Normalize input features using AUC")
 
-update.add_argument("--use_boosting",  action ="store_true", help="Use boosting when training in multiple trials")
-# update.add_argument("--no_boosting",action ="store_true", help="Do not use boosting when training in multiple trials")
+flags.add_argument("--use_tchlfix",   action ="store_true", help="Correct chl for pheopigments")
+# flags.add_argument("--no_tchlfix", action ="store_true", help="Do not correct chl for pheopigments")
 
-update.add_argument("--no_bagging",action ="store_true", help="Do not use bagging when training in multiple trials")
-# update.add_argument("--use_bagging",   action ="store_true", help="Use bagging when training in multiple trials")
+# flags.add_argument("--no_cache",  action ="store_true", help="Do not use any cached data")
+# flags.add_argument("--use_cache", action ="store_true", help="Use cached data, if available")
 
+flags.add_argument("--use_boosting",  action ="store_true", help="Use boosting when training in multiple trials (no longer implemented)")
+# flags.add_argument("--no_boosting",action ="store_true", help="Do not use boosting when training in multiple trials")
 
-parser.add_argument("--use_sim", action ="store_true", help="Use simulated training data")
+flags.add_argument("--no_bagging",    action ="store_true", help="Do not use bagging when training in multiple trials")
+# flags.add_argument("--use_bagging",   action ="store_true", help="Use bagging when training in multiple trials")
+
+flags.add_argument("--use_sim",       action ="store_true", help="Use simulated training data")
+
+flags.add_argument("--use_excl_Rrs",  action ="store_true", help="Drop raw Rrs features from the input when using ratio features")
+flags.add_argument("--use_all_ratio", action ="store_true", help="Use exhaustive list of ratio features instead of only those found in literature (should be combined with --use_kbest)")
+
+flags.add_argument("--use_kbest", type=int, nargs='?', const=5, default=0, help="Select top K features to use as input, based on mutual information")
 
 
 

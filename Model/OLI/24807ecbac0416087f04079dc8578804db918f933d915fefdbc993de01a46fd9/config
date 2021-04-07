@@ -1,0 +1,61 @@
+Created: 2021-04-07 15:51:54.600265
+Version: 1.2.0
+
+Dependencies
+------------
+align             : None
+batch             : 128
+benchmark         : False
+epsilon           : 0.001
+imputations       : 5
+l2                : 0.001
+lr                : 0.001
+model_lbl         : 
+n_hidden          : 100
+n_iter            : 10000
+n_layers          : 5
+n_mix             : 5
+no_bagging        : False
+product           : chl
+sat_bands         : False
+seed              : 42
+sensor            : OLI
+x_scalers         : 
+	('RobustScaler', [], {})
+y_scalers         : 
+	('LogTransformer', [], {})
+	('MinMaxScaler', [(-1, 1)], {})
+
+Configuration
+-------------
+animate           : False
+avg_est           : False
+darktheme         : False
+data_loc          : D:/Data/Insitu
+data_wavelengths  : [443 482 561 655]
+data_xtrain_shape : (4700, 4)
+data_ytrain_shape : (4700, 1)
+dataset           : all
+datasets_hash     : 6ca41090f34f3690e699df2a0b5213f42dd65f75c45d0348978bb4ef566d276b
+filename          : None
+model_loc         : Model
+n_redraws         : 50
+n_rounds          : 10
+no_load           : False
+no_save           : False
+plot_loss         : False
+save_data         : False
+save_stats        : False
+silent            : False
+sim_loc           : D:/Data/Simulated
+threshold         : None
+use_all_ratio     : False
+use_auc           : False
+use_boosting      : False
+use_excl_Rrs      : False
+use_kbest         : 0
+use_noise         : False
+use_ratio         : False
+use_sim           : False
+use_tchlfix       : False
+verbose           : False
