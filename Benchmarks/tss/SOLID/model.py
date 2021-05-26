@@ -70,7 +70,7 @@ def model(Rrs, wavelengths, sensor, *args, **kwargs):
 		estimate[type3] = (c * bbp_NIR - d).flatten()[type3]
 
 	ests, idxs  = mdn_estimate(Rrs(required), use_cmdline=False, **mdn_kws)
-	bbp_665 = ests[:, idxs['bb_p']][:, find_wavelength(660, required)]
+	bbp_665 = ests[:, idxs['bb_p']][:, find_wavelength(665, required, tol=tol)]
 	estimate[type2] = (a * bbp_665 ** b).flatten()[type2]
 
 	bbp = QAA(Rrs(None), wavelengths, sensor, *args, **kwargs)['bbp']
