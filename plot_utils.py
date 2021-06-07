@@ -40,6 +40,7 @@ def add_identity(ax, *line_args, **line_kwargs):
 	ax.annotate(r'$\mathbf{1:1}$', xy=(0.87,0.99), size=11, **ann_kwargs)
 
 
+
 def _create_metric(metric, y_true, y_est, longest=None, label=None):
 	''' Create a position-aligned string which shows the performance via a single metric '''
 	# if label == None:   label = metric.__name__.replace('SSPB', '\\beta').replace('MdSA', '\\varepsilon\\thinspace').replace('Slope','S\\thinspace')
@@ -47,9 +48,9 @@ def _create_metric(metric, y_true, y_est, longest=None, label=None):
 	if longest == None: longest = len(label)
 
 	ispct = metric.__qualname__ in ['mape', 'sspb', 'mdsa'] # metrics which are percentages
-	diff  = longest-len(label)
+	diff  = longest-len(label.replace('^',''))
 	space = r''.join([r'\ ']*diff + [r'\thinspace']*diff)
-	prec  = 1 if ispct else 3
+	prec  = (1 if abs(metric(y_true, y_est)) < 100 and metric.__name__ not in ['N'] else 0) if ispct or metric.__name__ in ['N'] else 3
 	# prec  = 1 if abs(metric(y_true, y_est)) < 100 else 0
 	stat  = f'{metric(y_true, y_est):.{prec}f}'
 	perc  = r'$\small{\mathsf{\%}}$' if ispct else ''
@@ -57,7 +58,7 @@ def _create_metric(metric, y_true, y_est, longest=None, label=None):
 
 def _create_stats(y_true, y_est, metrics, title=None):
 	''' Create stat box strings for all metrics, assuming there is only a single target feature '''
-	longest = max([len(metric.__name__.replace('SSPB', 'Bias').replace('MdSA', 'Error')) for metric in metrics])
+	longest = max([len(metric.__name__.replace('SSPB', 'Bias').replace('MdSA', 'Error').replace('^','')) for metric in metrics])
 	statbox = [_create_metric(m, y_true, y_est, longest=longest) for m in metrics]
 	
 	if title is not None:
@@ -71,12 +72,12 @@ def _create_multi_feature_stats(y_true, y_est, metrics, labels=None):
 	assert(len(labels) == y_true.shape[1] == y_est.shape[1]), f'Number of labels does not match number of features: {labels} - {y_true.shape}'
 	
 	title   = metrics[0].__name__.replace('SSPB', 'Bias').replace('MdSA', 'Error')
-	longest = max([len(label) for label in labels])
+	longest = max([len(label.replace('^','')) for label in labels])
 	statbox = [_create_metric(metrics[0], y1, y2, longest=longest, label=lbl) for y1, y2, lbl in zip(y_true.T, y_est.T, labels)]
 	statbox = [rf'$\mathbf{{\underline{{{title}}}}}$'] + statbox
 	return statbox 
 
-def add_stats_box(ax, y_true, y_est, metrics=[mdsa, sspb, slope], bottom_right=False, x=0.025, y=0.97, fontsize=16, label=None):
+def add_stats_box(ax, y_true, y_est, metrics=[mdsa, sspb, slope], bottom_right=False, bottom=False, right=False, x=0.025, y=0.97, fontsize=16, label=None):
 	''' Add a text box containing a variety of performance statistics, to the given axis '''
 	import matplotlib.pyplot as plt
 	plt.rc('text', usetex=True)
@@ -102,16 +103,25 @@ def add_stats_box(ax, y_true, y_est, metrics=[mdsa, sspb, slope], bottom_right=F
 
 	ann = ax.annotate(stats_box, xy=(x,y), size=fontsize, **ann_kwargs)
 
+	bottom |= bottom_right
+	right  |= bottom_right
+
 	# Switch location to (approximately) the bottom right corner
-	if bottom_right:
+	if bottom or right or bottom_right:
 		plt.gcf().canvas.draw()
 		bbox_orig = ann.get_tightbbox(plt.gcf().canvas.renderer).transformed(ax.transAxes.inverted())
 
-		new_x = 1 - (bbox_orig.x1 - bbox_orig.x0) + x
-		new_y = bbox_orig.y1 - bbox_orig.y0 + (1 - y)
-		ann.set_x(new_x)
-		ann.set_y(new_y)
-		ann.xy = (new_x - 0.04, new_y + 0.06)
+		new_x = bbox_orig.x0
+		new_y = bbox_orig.y1
+		if bottom:
+			new_y = bbox_orig.y1 - bbox_orig.y0 + (1 - y)
+			ann.set_y(new_y)
+			new_y += 0.06
+		if right:
+			new_x = 1 - (bbox_orig.x1 - bbox_orig.x0) + x
+			ann.set_x(new_x)
+			new_x -= 0.04
+		ann.xy = (new_x, new_y)
 	return ann 
 	
 
@@ -270,7 +280,7 @@ def default_dd(d={}, f=lambda k: k):
 
 
 @ignore_warnings
-def plot_scatter(y_test, benchmarks, bands, labels, products, sensor):
+def plot_scatter(y_test, benchmarks, bands, labels, products, sensor, title=None, methods=None, n_col=3):
 	import matplotlib.patheffects as pe 
 	import matplotlib.ticker as ticker
 	import matplotlib.pyplot as plt 
@@ -280,20 +290,29 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor):
 	folder.mkdir(exist_ok=True, parents=True)
 
 	product_labels = default_dd({
-		'chl' : 'Chl\\textit{a}',
+		'chl' : 'TChl\\textit{a}',
 		'aph' : '\\textit{a}_{ph}',
+		'tss' : 'TSS',
+		'cdom': '\\textit{a}_{CDOM}',
 	})
+	
 	product_units = default_dd({
 		'chl' : '[mg m^{-3}]',
 		'tss' : '[g m^{-3}]',
 		'aph' : '[m^{-1}]',
+		'cdom': '[m^{-1}]',
 	}, lambda k: '')
+
 	model_labels = default_dd({
 		'MDN' : 'MDN_{A}',
 	})
 
+	products = np.atleast_1d(products)
+
 	plt.rc('text', usetex=True)
 	plt.rcParams['mathtext.default']='regular'
+	# plt.rcParams['mathtext.fontset'] = 'stix'
+	# plt.rcParams['font.family'] = 'cm'
 
 	# Only plot certain bands
 	if len(labels) > 3 and 'chl' not in products:
@@ -304,26 +323,43 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor):
 
 		target     = [closest_wavelength(w, bands) for w in product_bands.get(products[0], product_bands['default'])]
 		plot_label = [w in target for w in bands]
-		plot_order = ['QAA', 'GIOP']
+		plot_order = ['MDN', 'QAA', 'GIOP']
 		plot_bands = True
 	else:
 		plot_label = [True] * len(labels)
-		plot_order = ['Smith_Blend', 'OC6', 'Mishra_NDCI', 'Gons_2band', 'Gilerson_2band']
+		plot_order = methods
 		plot_bands = False
+
+		if plot_order is None:
+			if 'chl' in products and len(products) == 1:
+				benchmarks = benchmarks['chl']
+				if 'MLP' in benchmarks:
+					plot_order = ['MDN', 'MLP', 'SVM', 'XGB', 'KNN', 'OC3']
+				else:
+					plot_order = ['MDN', 'Smith_Blend', 'OC6', 'Mishra_NDCI', 'Gons_2band', 'Gilerson_2band']
+			elif len(products) == 3 and all(k in products for k in ['chl', 'tss', 'cdom']):
+				n_col = 3
+				plot_order = {
+					'chl'  : ['MDN', 'OC3','Smith_Blend'],
+					'tss'  : ['MDN', 'SOLID', 'Novoa'],
+					'cdom' : ['MDN', 'Ficek', 'Mannino'],
+				}
+				plot_label = [True] * 3
+				plot_bands = True
 
 	labels = [(p,label) for label in labels for p in products if p in label]
 	print('Plotting labels:', [l for i,l in enumerate(labels) if plot_label[i]])
 	assert(len(labels) == y_test.shape[-1]), [len(labels), y_test.shape]
 
-	plot_order = ['MDN'] + [p for p in plot_order if p in benchmarks]
+	# plot_order = [p for p in plot_order if p in benchmarks]
 	fig_size   = 5
-	n_col      = max(3, sum(plot_label))
-	n_row      = int(not plot_bands) + len(plot_order) // (1 if plot_bands else n_col)
-	
+	n_col      = max(n_col, sum(plot_label))
+	n_row      = max(1,int(not plot_bands) + int(0.5 + len(plot_order) / (1 if plot_bands else n_col)) -1)
+	if isinstance(plot_order, dict): n_row = 3
 	if plot_bands:
 		n_col, n_row = n_row, n_col
 
-	fig, axes = plt.subplots(n_row, n_col, figsize=(fig_size*n_col, fig_size*n_row))
+	fig, axes = plt.subplots(n_row, n_col, figsize=(fig_size*n_col, fig_size*n_row+1))
 	axes      = [ax for axs in np.atleast_1d(axes) for ax in np.atleast_1d(axs)]
 	colors    = ['xkcd:sky blue', 'xkcd:tangerine', 'xkcd:fresh green', 'xkcd:greyish blue', 'xkcd:goldenrod',  'xkcd:clay', 'xkcd:bluish purple', 'xkcd:reddish']
 
@@ -335,23 +371,41 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor):
 	full_ax  = fig.add_subplot(111, frameon=False)
 	full_ax.tick_params(labelcolor='none', top=False, bottom=False, left=False, right=False, pad=10)
 
+	estimate_label = 'Estimated' #'Satellite-derived'
+	x_pre  = 'Measured'
+	y_pre  = estimate_label.replace('-', '\\textbf{-}')
 	plabel = f'{product_labels[products[0]]} {product_units[products[0]]}'
-	xlabel = fr'$\mathbf{{Measured {plabel}}}$'
-	ylabel = fr'$\mathbf{{Modeled {plabel}}}$'
-	full_ax.set_xlabel(xlabel.replace(' ', '\ '), fontsize=20, labelpad=10)
-	full_ax.set_ylabel(ylabel.replace(' ', '\ '), fontsize=20, labelpad=10)
+	xlabel = fr'$\mathbf{{{x_pre} {plabel}}}$'
+	ylabel = fr'$\mathbf{{{y_pre}}}$'+'' +fr'$\mathbf{{ {plabel}}}$'
+	if not isinstance(plot_order, dict):
+		full_ax.set_xlabel(xlabel.replace(' ', '\ '), fontsize=20, labelpad=10)
+		full_ax.set_ylabel(ylabel.replace(' ', '\ '), fontsize=20, labelpad=10)
+	else:
+		full_ax.set_xlabel(fr'$\mathbf{{{x_pre} Product}}$'.replace(' ', '\ '), fontsize=20, labelpad=10)
 
-	s_lbl = get_sensor_label(sensor).replace('-',' ')
+	s_lbl = title or get_sensor_label(sensor).replace('-',' ')
 	n_pts = len(y_test)
 	title = fr'$\mathbf{{\underline{{\large{{{s_lbl}}}}}}}$' + '\n' + fr'$\small{{\mathit{{N\small{{=}}}}{n_pts}}}$'
-	full_ax.set_title(title.replace(' ', '\ '), fontsize=24, y=1.04)
+	# full_ax.set_title(title.replace(' ', '\ '), fontsize=24, y=1.06)
+
+	if isinstance(plot_order, dict):
+		full_ax.set_title(fr'$\mathbf{{\underline{{\large{{{s_lbl}}}}}}}$'.replace(' ', '\ '), fontsize=24, y=1.03)
 
 	for plt_idx, (label, y_true) in enumerate(zip(labels, y_test.T)):
 		if not plot_label[plt_idx]: continue 
 
 		product, title = label 
-		for est_idx, est_lbl in enumerate(plot_order):
-			y_est = benchmarks[est_lbl][..., plt_idx]
+		plabel = f'{product_labels[product]} {product_units[product]}'
+
+		for est_idx, est_lbl in enumerate(plot_order[product] if isinstance(plot_order, dict) else plot_order):
+			if plt_idx >= (len(plot_order[product]) if isinstance(plot_order, dict) else benchmarks[est_lbl].shape[1]): continue
+			if isinstance(plot_order, dict) and est_lbl not in benchmarks[product]: 
+				axes[curr_idx].tick_params(labelcolor='none', top=False, bottom=False, left=False, right=False)
+				axes[curr_idx].axis('off')
+				curr_idx += 1
+				continue 
+
+			y_est = benchmarks[product][est_lbl] if isinstance(plot_order, dict) else benchmarks[est_lbl][..., plt_idx]
 			ax    = axes[curr_idx]
 			cidx  = (curr_idx % n_col) if plot_bands else curr_idx
 			color = colors[cidx]
@@ -360,7 +414,7 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor):
 			last_row  = curr_idx >= ((n_row-1)*n_col) #((curr_idx+1) % n_row) == 0
 			first_col = (curr_idx % n_col) == 0
 			last_col  = ((curr_idx+1) % n_col) == 0
-		
+			print(curr_idx, first_row, last_row, first_col, last_col, est_lbl, product, plabel)
 			y_est_log  = np.log10(y_est).flatten()
 			y_true_log = np.log10(y_true).flatten()
 			curr_idx  += 1
@@ -371,20 +425,20 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor):
 			if est_lbl == 'MDN':
 				[i.set_linewidth(5) for i in ax.spines.values()]
 				est_lbl = 'MDN_{A}'
-				est_lbl = 'MDN-I'
+				# est_lbl = 'MDN-I'
 			else:
-				est_lbl = est_lbl.replace('Mishra_','').replace('Gons_2band', 'Gons').replace('Gilerson_2band', 'GI2B').replace('Smith_','')
+				est_lbl = est_lbl.replace('Mishra_','').replace('Gons_2band', 'Gons').replace('Gilerson_2band', 'GI2B').replace('Smith_','').replace('Cao_XGB','BST')#.replace('Cao_', 'Cao\ ')
 
-			if product not in ['chl', 'tss'] and last_col:
+			if product not in ['chl', 'tss', 'cdom'] and last_col:
 				ax2 = ax.twinx()
 				ax2.tick_params(labelcolor='none', top=False, bottom=False, left=False, right=False, pad=0)
 				ax2.grid(False)
 				ax2.set_yticklabels([])
 				ax2.set_ylabel(fr'$\mathbf{{{bands[plt_idx]:.0f}nm}}$', fontsize=20)
 
-			minv = int(np.nanmin(y_true_log)) - 1 if product != 'aph' else -4
-			maxv = int(np.nanmax(y_true_log)) + 1 if product != 'aph' else 1
-			loc  = ticker.LinearLocator(numticks=maxv-minv+1)
+			minv = -2 if product == 'cdom' else -1 # int(np.nanmin(y_true_log)) - 1 if product != 'aph' else -4
+			maxv = 3 if product == 'tss' else 3 if product == 'chl' else 1 #int(np.nanmax(y_true_log)) + 1 if product != 'aph' else 1
+			loc  = ticker.LinearLocator(numticks=int(round(maxv-minv+1.5)))
 			fmt  = ticker.FuncFormatter(lambda i, _: r'$10$\textsuperscript{%i}'%i)
 
 			ax.set_ylim((minv, maxv))
@@ -394,29 +448,53 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor):
 			ax.xaxis.set_major_formatter(fmt)
 			ax.yaxis.set_major_formatter(fmt)
 			
-			if not last_row:  ax.set_xticklabels([])
-			if not first_col: ax.set_yticklabels([])
+			# if not last_row:                   ax.set_xticklabels([])
+			# elif isinstance(plot_order, dict): ax.set_xlabel(fr'$\mathbf{{{x_pre}}}$'+'' +fr'$\mathbf{{ {plabel}}}$'.replace(' ', '\ '), fontsize=18)
+			if not first_col:                  ax.set_yticklabels([])
+			elif isinstance(plot_order, dict): 
+				ylabel = fr'$\mathbf{{{y_pre}}}$'+'' +fr'$\mathbf{{ {plabel}}}$' + '\n' + fr'$\small{{\mathit{{N\small{{=}}}}{np.isfinite(y_true_log).sum()}}}$'
+				ax.set_ylabel(ylabel.replace(' ', '\ '), fontsize=18)
 
 			valid = np.logical_and(np.isfinite(y_true_log), np.isfinite(y_est_log))
 			if valid.sum():
 				sns.regplot(y_true_log[valid], y_est_log[valid], ax=ax, scatter_kws=s_kws, line_kws=l_kws, fit_reg=True, truncate=False, robust=True, ci=None)
 				kde = sns.kdeplot(y_true_log[valid], y_est_log[valid], shade=False, ax=ax, bw='scott', n_levels=4, legend=False, gridsize=100, color=color)
-				kde.collections[2].set_alpha(0)
+				# kde.collections[2].set_alpha(0)
 
-			if len(valid.flatten()) != valid.sum():
-				ax.scatter(y_true_log[~valid], [minv]*(~valid).sum(), color='r', alpha=0.4, label=r'$\mathbf{%s\ invalid}$' % (~valid).sum())
+			invalid = np.logical_and(np.isfinite(y_true_log), ~np.isfinite(y_est_log))
+			if invalid.sum():
+				ax.scatter(y_true_log[invalid], [minv]*(invalid).sum(), color='r', alpha=0.4, label=r'$\mathbf{%s\ invalid}$' % (invalid).sum())
 				ax.legend(loc='lower right', prop={'weight':'bold', 'size': 16})
 
 			add_identity(ax, ls='--', color='k', zorder=20)
-			add_stats_box(ax, y_true, y_est)
 
-			if first_row or not plot_bands:
-				ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$', fontsize=18)
+			if valid.sum():
+				add_stats_box(ax, y_true[valid], y_est[valid])
+
+			if first_row or not plot_bands or (isinstance(plot_order, dict) and plot_order[product][est_idx] != 'MDN'):
+				if est_lbl == 'BST':
+					# ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$'+'\n'+r'$\small{\textit{(Cao\ et\ al.\ 2020)}}$', fontsize=18)
+					ax.set_title(r'$\small{\textit{(Cao\ et\ al.\ 2020)}}$' + '\n' + fr'$\mathbf{{\large{{{est_lbl}}}}}$', fontsize=18, linespacing=0.95)
+				
+				elif est_lbl == 'Ficek':
+					# ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$'+'\n'+r'$\small{\textit{(Cao\ et\ al.\ 2020)}}$', fontsize=18)
+					ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$' + r'$\small{\textit{\ (et\ al.\ 2011)}}$', fontsize=18, linespacing=0.95)
+				
+				elif est_lbl == 'Mannino':
+					# ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$'+'\n'+r'$\small{\textit{(Cao\ et\ al.\ 2020)}}$', fontsize=18)
+					ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$' + r'$\small{\textit{\ (et\ al.\ 2008)}}$', fontsize=18, linespacing=0.95)
+
+				elif est_lbl == 'Novoa':
+					# ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$'+'\n'+r'$\small{\textit{(Cao\ et\ al.\ 2020)}}$', fontsize=18)
+					ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$' + r'$\small{\textit{\ (et\ al.\ 2017)}}$', fontsize=18, linespacing=0.95)
+
+				else: ax.set_title(fr'$\mathbf{{\large{{{est_lbl}}}}}$', fontsize=18)
 
 			ax.tick_params(labelsize=18)
 			ax.grid('on', alpha=0.3)
 
-	filename = folder.joinpath(f'{products}_{sensor}_{n_pts}test.png')
+	u_label  = ",".join([o.split('_')[0] for o in plot_order]) if len(plot_order) < 10 else f'{n_row}x{n_col}'
+	filename = folder.joinpath(f'{",".join(products)}_{sensor}_{n_pts}test_{u_label}.png')
 	plt.tight_layout()
 	# plt.subplots_adjust(wspace=0.35)
 	plt.savefig(filename.as_posix(), dpi=100, bbox_inches='tight', pad_inches=0.1,)
