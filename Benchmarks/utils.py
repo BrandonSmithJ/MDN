@@ -18,7 +18,7 @@ def find_wavelength(k, waves, validate=True, tol=5):
 	w = np.atleast_1d(k)
 	i = np.abs(waves - w[:, None]).argmin(1) 
 	assert(not validate or (np.abs(w-waves[i]).max() <= tol)), f'Needed {k}, but closest was {waves[i]} in {waves} ({np.abs(w-waves[i]).max()} > {tol})'
-	return i
+	return i #i.reshape(np.array(k).shape)
 
 
 def closest_wavelength(k, waves, validate=True, tol=5): 
@@ -53,11 +53,11 @@ def get_required(Rrs, waves, required=[], tol=5):
 	'''
 	waves = np.array(waves)
 	Rrs = np.atleast_2d(Rrs)
-	assert(Rrs.shape[1] == len(waves)), \
+	assert(Rrs.shape[-1] == len(waves)), \
 		f'Shape mismatch: Rrs={Rrs.shape}, wavelengths={len(waves)}'
 	assert(all([has_band(w, waves, tol) for w in required])), \
 		f'At least one of {required} is missing from {waves}'
-	return lambda w, validate=True: Rrs[:, find_wavelength(w, waves, tol=tol, validate=validate)] if w is not None else Rrs
+	return lambda w, validate=True: Rrs[..., find_wavelength(w, waves, tol=tol, validate=validate)] if w is not None else Rrs
 
 
 def get_benchmark_models(products, allow_opt=False, debug=False, method=None):
@@ -76,7 +76,7 @@ def get_benchmark_models(products, allow_opt=False, debug=False, method=None):
 
 		# Iterate over all benchmark algorithm folders in the appropriate product directory
 		for (_, name, is_folder) in pkgutil.iter_modules([product_dir]):
-			if is_folder:
+			if is_folder and name[0] != '_':
 				
 				module   = Path(__file__).parent.parent.stem
 				imported = import_module(f'{module}.{benchmark_dir.stem}.{product_dir.stem}.{name}.model')

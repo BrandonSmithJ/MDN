@@ -8,11 +8,11 @@ def validate_shape(func):
 	''' Decorator to flatten all function input arrays, and ensure shapes are the same '''
 	@functools.wraps(func)
 	def helper(*args, **kwargs):
-		flat_args = [a.flatten() if hasattr(a, 'flatten') else a for a in args]
-		shapes    = [a.shape for a in flat_args if hasattr(a, 'shape')]
-		original  = [a.shape for a in args      if hasattr(a, 'shape')]
-		assert(all(shapes[0] == s for s in shapes)), f'Shapes mismatch in {func.__name__}: {original}'
-		return func(*flat_args, **kwargs)
+		flat     = [a.flatten() if hasattr(a, 'flatten') else a for a in args]
+		flat_shp = [a.shape for a in flat if hasattr(a, 'shape')]
+		orig_shp = [a.shape for a in args if hasattr(a, 'shape')]
+		assert(all(flat_shp[0] == s for s in flat_shp)), f'Shapes mismatch in {func.__name__}: {orig_shp}'
+		return func(*flat, **kwargs)
 	return helper  
 
 
@@ -205,8 +205,12 @@ def mwr(y, y_hat, y_bench):
 	return stats.sum() / np.isfinite(y).sum()
 
 
-def performance(key, y, y_hat, metrics=[mdsa, sspb, slope, rmse, rmsle, mae, leqznan]):
+def performance(key, y, y_hat, metrics=[mdsa, sspb, slope, msa, rmsle, mae, leqznan], csv=False):
 	''' Return a string containing performance using various metrics. 
 		y should be the true value, y_hat the estimated value. '''
-	return '%8s | %s' % (key, '   '.join([
-			'%s: %6.3f' % (f.__name__, f(y,y_hat)) for f in metrics]))
+	y     = y.flatten()
+	y_hat = y_hat.flatten()
+	try:
+		if csv: return f'{key},'+','.join([f'{f.__name__}:{f(y, y_hat)}' for f in metrics])
+		else:   return f'{key:>12} | '+'   '.join([f'{f.__name__}: {f(y, y_hat):>6.3f}' for f in metrics])
+	except Exception as e: return f'{key:>12} | Exception: {e}'

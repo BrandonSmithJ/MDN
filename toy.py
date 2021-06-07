@@ -15,7 +15,7 @@ from .mdn2 import MDN
 
 import numpy as np 
 import seaborn as sns
-
+import tensorflow as tf
 
 N_TRAIN  = 10000 
 N_VALID  = 2000
@@ -215,11 +215,200 @@ if __name__ == '__main__':
 		# from .mdn_ex import get_mdn, train_mdn, predict
 		# model = get_mdn()
 
+		class CustomCallback(tf.keras.callbacks.Callback):
+			_cb_iter = 0
+
+			def on_train_batch_end(self, batch, logs=None):
+				self._cb_iter += 1
+				if self._cb_iter % (kwargs['n_iter'] // kwargs['n_redraws']) == 0:
+					print(self._cb_iter)
+					train_out = self.model(x_train)
+					valid_out = self.model(x_valid)
+					test_out  = self.model(x_test)
+
+					model = self.model.layers[-1]
+					[a.cla() for a in [ax, ax2, ax3, ax4, ax5, ax6]]
+
+					m_valid = model.get_most_likely(valid_out).numpy()
+
+					ax2.plot(y_valid, m_valid, 'bo', alpha=0.2)
+					add_identity(ax2, color='k', ls='--')
+					add_stats_box(ax2, y_valid, m_valid)
+
+
+					prior, mu, sigma = model.get_coefs(test_out)
+					prior = prior.numpy()
+					mu    = mu.numpy()
+					sigma = sigma.numpy()
+
+					ax.set_xlim((xmin, xmax))
+					ax.set_ylim((ymin, ymax))
+					ax.plot(x_train, y_train, 'kx', zorder=1)
+
+					top = prior == prior.max(1, keepdims=True)
+					top[top.sum(1) > 1] = np.eye(top.shape[1])[np.random.randint(top.shape[1])].astype(np.bool)
+					ax.plot(x_test, mu[top], 'r.', zorder=15)
+
+
+					valid_prior, valid_mu, valid_si = model.get_coefs(train_out)
+					valid_prior = valid_prior.numpy()
+					valid_mu    = valid_mu.numpy()
+					valid_si    = valid_si.numpy()
+					valid_top   = valid_prior.argmax(axis=1)
+
+					top_mu = valid_mu[np.arange(valid_mu.shape[0]), valid_top].flatten()
+					top_si = valid_si[np.arange(valid_mu.shape[0]), valid_top]
+
+					# We use the mixture mode as the mean, and calculate the resulting mixture covariance
+					# print(np.transpose(valid_mu - top_mu[:,None,None], (0,2,1)).shape)
+					# print(np.matmul(np.transpose(valid_mu - top_mu[:,None,None], (0,2,1)), valid_mu - top_mu[:,None, None]).shape)
+					mixture_cov = valid_prior[..., None, None] * (valid_si + np.matmul(np.transpose(valid_mu - top_mu[:,None,None], (0,2,1)), valid_mu - top_mu[:,None, None])[:, None, ...])
+					mixture_cov = mixture_cov.sum(axis=1)
+
+					mixture_cov = top_si
+
+					# print(mixture_cov.shape)
+					# print(mixture_cov[0])
+					# print()
+					# u, s, _ = np.linalg.svd(mixture_cov, hermitian=True)
+					# print(u.flatten())
+					# print(u.shape, s.shape)
+					# print(np.matmul(np.matmul(u, s[...,None]), np.transpose(u, (0,2,1)))[0])
+					from scipy.special import erfinv
+
+					# https://faculty.ucmerced.edu/mcarreira-perpinan/papers/cs-99-03.pdf
+					# For a confidence level given by probability p (0<p<1) and number of dimensions d, rho is the error bar coefficient
+					conf = 0.95#np.logspace(-1, 0, 30) - 1e-4 # 0.99
+					# print(conf.min(), conf.max())
+					rho = lambda p, d=1: 2 ** 0.5 * erfinv(p ** (1/d)) 
+
+					# conf_surf = np.zeros((len(valid_si), len(conf)))
+					# for ind in valid_prior.shape[1]:
+					u, s, _ = np.linalg.svd(valid_si[:,0], hermitian=True)
+					bar = 2 * rho(conf) * s ** 0.5 # error bars centered at the mixture mode
+						
+						# conf_surf += bar * valid_prior[:, ind] 
+
+					# print(bar.flatten())
+					# print(bar.shape)
+					# assert(0)
+
+					x, y = map(np.array, zip(*sorted(zip(x_train.flatten(), top_mu), key=lambda z:z[1])))
+					x2, y2 = map(np.array, zip(*sorted(zip(x_train.flatten(), top_mu+bar.flatten()), key=lambda z:z[1])))
+					x3, y3 = map(np.array, zip(*sorted(zip(x_train.flatten(), top_mu-bar.flatten()), key=lambda z:z[1])))
+					# print(list(zip(np.round(x,2), np.round(y,2))))
+					# print(list(zip(np.round(x2,2), np.round(y2,2))))
+					# print(list(zip(np.round(x3,2), np.round(y3,2))))
+
+					ax.scatter(x2, y2, color='g', zorder=100)
+					ax.scatter(x, y, color='r', zorder=100)
+					ax.scatter(x3, y3, color='y', zorder=100)
+
+
+					for i,m in enumerate(mu[top]):
+
+						circle = Ellipse((x_test[i], m), 0.25, sigma[top][i].flatten())#*np.diag(sigma[i,0]))
+						circle.set_alpha(.8)
+						circle.set_facecolor('g')
+						circle.set_zorder(10)
+						ax.add_artist(circle)
+
+						# circle = Ellipse((x_test[i],m), 0.25, sigma[top][i].flatten() + var[i])
+						# circle.set_alpha(.5)
+						# circle.set_facecolor('cyan')
+						# circle.set_zorder(9)
+						# ax2.add_artist(circle)
+
+					IDX   = 0
+					sigma = sigma[..., IDX, IDX][None, ...] if len(sigma.shape) == 4 else sigma[..., IDX][None, ...]
+					mu    = mu[..., IDX][None, ...]
+					prior = prior[None, ...]
+					Y   = np.linspace(y_train.min() * 1.5, y_train.max()*1.5, 300)[::-1, None, None]
+					var = 2 * sigma ** 2
+
+					num = np.exp(-(Y - mu) ** 2 / var)
+					Z   = (prior * (num / (np.pi * var) ** 0.5)).sum(2)
+					X, Y2 = np.meshgrid(x_test.flatten(), Y.flatten())
+					# plt.contourf(X, Y2, MinMaxScaler((1e-3,1)).fit_transform(Z), norm=LogNorm(vmin=1e-3, vmax=1.), levels=np.logspace(-3, 0, 7), zorder=5, cmap='plasma', alpha=.1)
+
+					ax.contour(X, Y2, MinMaxScaler((1e-3,1)).fit_transform(Z), norm=LogNorm(vmin=1e-3, vmax=1.), levels=np.logspace(-3, 0, 5), zorder=5, cmap='inferno', alpha=.5)
+					# ax.scatter(x_test.flatten(), np.array([Y2[Z.argmax(0)[i], i] for i in range(Y2.shape[1])]), 3, label='Max Probability')
+					# kde = sns.kdeplot(x_train.flatten(), y_train.flatten(), shade=False, ax=ax, bw='scott', n_levels=10, legend=False, gridsize=100, color='red')
+					# kde.collections[2].set_alpha(0)
+
+					if False:
+						ax3.cla()
+						ax3.plot(losses[::10])
+						ax3.set_yscale('log')
+					else:
+						ax3.cla()
+
+						nn_out = self.model(x_nonoise)
+						prior, mu, sigma = model.get_coefs(nn_out)
+						likely = model.get_most_likely(nn_out).numpy()
+						prior = prior.numpy()
+						mu = mu.numpy()
+						sigma = sigma.numpy()
+						# (prior, mu, sigma), likely = model.session.run([model.coefs, model.most_likely], feed_dict={model.x: x_nonoise})
+						# prior, mu, sigma = predict(model, x_nonoise)
+						# likely = MDN.get_most_likely_estimates((prior, mu, sigma))
+
+						add_stats_box(ax3, y_nonoise, likely)
+						
+						ax4.cla()
+						# ax4.hist(np.max(prior, 1))
+						ax4.hist(prior, stacked=True, bins=20)
+						ax4.set_xlabel('Likelihood')
+						ax4.set_ylabel('Frequency')
+						
+						# ax3.set_xlim((xmin, xmax))
+						# ax3.set_ylim((ymin, ymax))
+						# ax.plot(*y_data.T, 'kx')
+						ax3.plot(x_nonoise, y_nonoise, 'kx', zorder=1)
+						# ax.plot(*mu[:,0].T, 'r.')
+						ax3.scatter(x_nonoise.flatten(), likely.flatten(), c=np.argmax(prior, 1).flatten()/prior.shape[1], marker='^', cmap='coolwarm', zorder=15, alpha=0.2)
+						# print('diff:', np.abs(likely.flatten() - model.get_most_likely_estimates([prior, mu, sigma]).flatten()).sum())
+						# ax3.scatter(x_nonoise.flatten(), model.get_most_likely_estimates([prior, mu, sigma]).flatten(), c=np.argmax(prior, 1).flatten()/prior.shape[1], cmap='jet', zorder=15, alpha=0.2)
+						for m in range(mu.shape[1]):
+							ax3.scatter(x_nonoise.flatten(), mu[:,m].flatten(), alpha=0.01)
+						# ax3.scatter(x_nonoise.flatten(), np.sum(mu[...,0] * prior, 1).flatten())
+
+						IDX   = 0
+						sigma = sigma[..., IDX, IDX][None, ...] if len(sigma.shape) == 4 else sigma[..., IDX][None, ...]
+						sigma = np.ones_like(sigma) * 0.5
+						mu    = mu[..., IDX][None, ...]
+						prior = prior[None, ...]
+						Y   = np.linspace(y_nonoise.min() * 1.5, y_nonoise.max()*1.5, 1000)[::-1, None, None]
+						# print(Y)
+						num = np.exp(-0.5 * ((Y - mu) / sigma) ** 2)
+						Z   = (prior * (num / (sigma * (2 * np.pi) ** 0.5) )).sum(2)
+						# print(Z[:,0])
+						# print(prior[:,0])
+						# print(mu[:,0])
+						# print(sigma[:,0])
+						X, Y2 = np.meshgrid(x_nonoise.flatten(), Y.flatten())
+
+						ax3.contourf(X, Y2, Z,  zorder=16, cmap='inferno', alpha=.3)
+						# ax3.contour(X, Y2, MinMaxScaler((1e-3,1)).fit_transform(Z), norm=LogNorm(vmin=1e-3, vmax=1.), levels=np.logspace(-3, 0, 100), zorder=5, cmap='inferno', alpha=.5)
+						# ax.scatter(x_test.flatten(), np.array([Y2[Z.argmax(0)[i], i] for i in range(Y2.shape[1])]), 3, label='Max Probability')
+
+
+
+
+					plt.pause(1e-9)
+
+			# def on_epoch_end(self, *args, **kwargs):
+			# 	print('epoch end')
+
+
 		model = MDN(**kwargs)
 		model.n_in   = x_train.shape[1]
 		model.n_pred = y_train.shape[1] 
 		model.n_out  = model.n_mix * (1 + model.n_pred + (model.n_pred*(model.n_pred+1))//2) # prior, mu, (lower triangle) sigma
 		model.construct_model()	
+		model.model.fit(x_train, y_train, batch_size=128, epochs=100, verbose=0, callbacks=[CustomCallback()])
+
+
 
 		likelihoods = np.zeros(len(x_train)) + 0.01
 		picked = np.zeros(len(x_train))

@@ -1,8 +1,9 @@
-from .meta import get_sensor_bands, SENSOR_BANDS, ANCILLARY, PERIODIC
+from .meta import get_sensor_bands, ANCILLARY, PERIODIC
 from .parameters import update, hypers, flags
 from .__version__ import __version__
 
 from collections import defaultdict as dd
+from importlib import import_module 
 from datetime import datetime as dt
 from pathlib import Path
 from tqdm import trange
@@ -13,7 +14,7 @@ import hashlib, re, warnings, functools
 
 
 def ignore_warnings(func):
-	''' Decorator to silence warnings (Runtime, User, Deprecation, etc.) '''
+	''' Decorator to silence all warnings (Runtime, User, Deprecation, etc.) '''
 	@functools.wraps(func)
 	def helper(*args, **kwargs):
 		with warnings.catch_warnings():
@@ -85,6 +86,21 @@ def get_labels(wavelengths, slices, n_out=None):
 			for i   in range(v.stop - v.start)][:n_out]	
 
 
+class CustomUnpickler(pkl.Unpickler):
+	''' Ensure the classes are found, without requiring an import '''
+	_transformers = [p.stem for p in Path(__file__).parent.joinpath('transformers').glob('*Transformer.py')]
+	_warned       = False
+
+	def find_class(self, module, name):
+		if name in self._transformers:
+			module   = Path(__file__).parent.stem
+			imported = import_module(f'{module}.transformers.{name}')
+			return getattr(imported, name)
+		elif name == 'TransformerPipeline':
+			from .transformers import TransformerPipeline
+			return TransformerPipeline
+		return super().find_class(module, name)
+
 def store_pkl(filename, output):
 	''' Helper to write pickle file '''
 	with Path(filename).open('wb') as f:
@@ -93,7 +109,6 @@ def store_pkl(filename, output):
 
 def read_pkl(filename):
 	''' Helper to read pickle file '''
-	from .transformers import CustomUnpickler
 	with Path(filename).open('rb') as f:
 		return CustomUnpickler(f).load()
 
@@ -170,10 +185,16 @@ def mask_land(data, bands, threshold=0.2, verbose=False):
 	nir   = closest_wavelength(900,  bands, validate=False)
 	swir  = closest_wavelength(1600, bands, validate=False)
 	
-	b1, b2 = (green, swir) if swir > 1500 else (red, nir)
+	b1, b2 = (green, swir) if swir > 1500 else (red, nir) if red != nir else (min(bands), max(bands))
 	i1, i2 = find_wavelength(b1, bands), find_wavelength(b2, bands)
 	n_diff = lambda a, b: np.ma.masked_invalid((a-b) / (a+b))
 	if verbose: print(f'Using bands {b1} & {b2} for land masking')
+	# import matplotlib.pyplot as plt 
+	# plt.clf()
+	# plt.imshow(n_diff(data[..., i1], data[..., i2]).filled(fill_value=threshold-1))
+	# plt.colorbar()
+	# plt.show()
+	# assert(0)
 	return n_diff(data[..., i1], data[..., i2]).filled(fill_value=threshold-1) <= threshold
 
 
@@ -244,27 +265,21 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 	return bands, np.dstack([data[f] for f in features])
 
 
-
-
-
-
-
-
 def generate_config(args, create=True, verbose=True):
 	''' 
 	Create a config file for the current settings, and store in
 	a folder location determined by certain parameters: 
-		MDN/model_loc/sensor/model_lbl/model_hash/config
-	"model_hash" is computed within this function, but a value can 
-	also be passed in manually via args.model_hash in order to allow
+		MDN/model_loc/sensor/model_lbl/model_uid/config
+	"model_uid" is computed within this function, but a value can 
+	also be passed in manually via args.model_uid in order to allow
 	previous MDN versions to run.
 	'''
 	root = Path(__file__).parent.resolve().joinpath(args.model_loc, args.sensor, args.model_lbl)
 
-	# Can override the model hash in order to allow prior MDN versions to be run
-	if hasattr(args, 'model_hash'):
-		if args.verbose: print(f'Using manually set model hash: {args.model_hash}')
-		return root.joinpath(args.model_hash)
+	# Can override the model uid in order to allow prior MDN versions to be run
+	if hasattr(args, 'model_uid'):
+		if args.verbose: print(f'Using manually set model uid: {args.model_uid}')
+		return root.joinpath(args.model_uid)
 
 	# Hash is always dependent upon these values
 	dependents = [getattr(act, 'dest', '') for group in [hypers, update] for act in group._group_actions]
@@ -292,10 +307,10 @@ def generate_config(args, create=True, verbose=True):
 		elif k in dependents:    config.append(f'{k:<18}: {v}')
 		else:                    others.append(f'{k:<18}: {v}') 
 
-	config = '\n'.join(config) # Model is dependent on some arguments, so they change the hash
+	config = '\n'.join(config) # Model is dependent on some arguments, so they change the uid
 	others = '\n'.join(others) # Other arguments are stored for replicability
 	ver_re = r'(Version\: \d+\.\d+)(?:\.\d+\n[-]+\n)' # Match major/minor version within subgroup, patch/dashes within pattern
-	h_str  = re.sub(ver_re, r'\1.0\n', config)        # Substitute patch version for ".0" to allow patches within the same hash
+	h_str  = re.sub(ver_re, r'\1.0\n', config)        # Substitute patch version for ".0" to allow patches within the same uid
 	uid    = hashlib.sha256(h_str.encode('utf-8')).hexdigest()
 	folder = root.joinpath(uid)
 	c_file = folder.joinpath('config')
@@ -407,7 +422,7 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 
 	locs = [Path(loc).resolve() for loc in np.atleast_1d(locs)]
 	print('\n-------------------------')
-	print(f'Loading data for sensor {locs[0].parts[-1]}')
+	print(f'Loading data for sensor {locs[0].parts[-1]}, and targets {[v.replace("../","") for v in keys[1:]]}')
 	if allow_missing:
 		print('Allowing data regardless of whether all bands exist')
 
@@ -572,15 +587,15 @@ def _filter_invalid(x_data, y_data, slices, allow_nan_inp=False, allow_nan_out=F
 def get_data(args):
 	''' Main function for gathering datasets '''
 	np.random.seed(args.seed)
-	sensor   = args.sensor.split('-')[0]+(('-'+args.sensor.split('-')[-1]) if '-' in args.sensor and args.sensor.split('-')[-1][0] == 'S' else '')
+	sensor   = args.sensor.split('-')[0]
 	products = args.product.split(',')
 	bands    = get_sensor_bands(args.sensor, args)
 
 	# Using Hydrolight simulated data
 	if using_feature(args, 'sim'):
 		assert(not using_feature(args, 'ratio')), 'Too much memory needed for simulated+ratios'
-		data_folder = ['848']
-		data_keys   = ['Rrs', 'bb_p', 'a_p', '../chl', '../tss', '../cdom']
+		data_folder = ['790']
+		data_keys   = ['Rrs']+products #['Rrs', 'bb_p', 'a_p', '../chl', '../tss', '../cdom']
 		data_path   = Path(args.sim_loc)
 
 	else:
@@ -596,20 +611,15 @@ def get_data(args):
 			if product in ['chl', 'tss', 'cdom']:
 				product = f'../{product}'
 		
-			# MSI / OLCI paper
-			if args.dataset == 'sentinel_paper' and product == '../chl': 
-				datasets = ['Sundar', 'UNUSED/Taihu_old', 'UNUSED/Taihu2', 'UNUSED/Schalles_old', 'SeaBASS2', 'Vietnam'] 
-
 			# Find all datasets with the given product available
-			else:
-				safe_prod = product.replace('*', '[*]') # Prevent glob from getting confused by wildcard
-				datasets  = [get_dataset(path, product) for path in data_path.glob(f'*/{sensor}/{safe_prod}.csv')]
+			safe_prod = product.replace('*', '[*]') # Prevent glob from getting confused by wildcard
+			datasets  = [get_dataset(path, product) for path in data_path.glob(f'*/{sensor}/{safe_prod}.csv')]
 
-				if product == 'aph':
-					datasets = [d for d in datasets if d not in ['PACE']]
-				
-				if product == '../chl':
-					datasets = [d for d in datasets if d not in ['Arctic']]
+			if product == 'aph':
+				datasets = [d for d in datasets if d not in ['PACE']]
+			
+			if getattr(args, 'subset', ''):
+				datasets = [d for d in datasets if d in args.subset.split(',')]
 				
 			data_folder += datasets
 			data_keys   += [product]
@@ -645,7 +655,7 @@ def get_data(args):
 
 	# if -nan IS in the sensor label: do not filter samples; allow all, regardless of nan composition
 	if '-nan' not in args.sensor:
-		(x_data, *_), (y_data, *_), (sources, *_) = _filter_invalid(x_data, y_data, slices, other=[sources], allow_nan_out=len(data_keys) > 2)
+		(x_data, *_), (y_data, *_), (sources, *_) = _filter_invalid(x_data, y_data, slices, other=[sources], allow_nan_out=not using_feature(args, 'sim') and len(data_keys) > 2)
 			
 	print('\nFinal counts:')
 	print('\n'.join([f'\tN={num:>5} | {loc}' for loc, num in zip(*np.unique(sources[:, 0], return_counts=True))]))

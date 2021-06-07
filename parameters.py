@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser(epilog="""
 """)
 
 parser.add_argument("filename",    nargs  ="?",          help="CSV file containing Rrs values to estimate from")
-parser.add_argument("--model_loc", default="Model",      help="Location of trained models")
+parser.add_argument("--model_loc", default="Weights",    help="Location of trained model weights")
 # parser.add_argument("--data_loc",  default="/media/brandon/NASA/Data/Insitu",  help="Location of in situ data")
 # parser.add_argument("--sim_loc",   default="/media/brandon/NASA/Data/Simulated", help="Location of simulated data")
 parser.add_argument("--data_loc",  default="D:/Data/Insitu",    help="Location of in situ data")
@@ -28,6 +28,7 @@ parser.add_argument("--darktheme", action ="store_true", help="Use a dark color 
 parser.add_argument("--animate",   action ="store_true", help="Store the training progress as an animation (mp4)")
 parser.add_argument("--save_data", action ="store_true", help="Save the data used for the given args")
 parser.add_argument("--save_stats",action ="store_true", help="Store partial training statistics & estimates for later analysis")
+parser.add_argument("--LOO_CV",    action ="store_true", help="Leave-one-out cross validation")
 
 
 ''' Flags which require model retrain if changed '''
@@ -38,7 +39,8 @@ update.add_argument("--product",   default="chl",        help="Product to estima
 update.add_argument("--sensor",    default="OLI",        help="Sensor to estimate from (See meta.py for available options)")
 update.add_argument("--align",     default=None,         help="Comma-separated list of sensors to align data with; passing \"all\" uses all sensors (See meta.py for available options)")
 update.add_argument("--model_lbl", default="",      	 help="Label for a model")
-update.add_argument("--seed",      default=42,   type=int,   help="Random seed")
+update.add_argument("--seed",      default=42, type=int, help="Random seed")
+update.add_argument("--subset",    default='',           help="Comma-separated list of datasets to use when fetching data")
 
 
 ''' Flags which have a yet undecided default value '''
@@ -70,7 +72,6 @@ flags.add_argument("--use_excl_Rrs",  action ="store_true", help="Drop raw Rrs f
 flags.add_argument("--use_all_ratio", action ="store_true", help="Use exhaustive list of ratio features instead of only those found in literature (should be combined with --use_kbest)")
 
 flags.add_argument("--use_kbest", type=int, nargs='?', const=5, default=0, help="Select top K features to use as input, based on mutual information")
-
 
 
 ''' Hyperparameters '''
