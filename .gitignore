@@ -8,11 +8,10 @@ Cache
 
 # Development files
 Development
-Model_dev
+Weights_*
 map_files
-
-# Other benchmarks (temporary, until added to benchmark folder)
-gsm
+toy*
+**/*_skip_*
 
 # pdf files
 *.pdf

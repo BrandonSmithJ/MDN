@@ -1,0 +1,65 @@
+Created: 2021-06-07 13:09:39.314085
+Version: 2.0.0
+
+Dependencies
+------------
+align             : None
+batch             : 128
+benchmark         : False
+epsilon           : 0.001
+imputations       : 5
+l2                : 0.001
+lr                : 0.001
+model_lbl         : 
+n_hidden          : 100
+n_iter            : 10000
+n_layers          : 5
+n_mix             : 5
+no_bagging        : False
+product           : chl
+sat_bands         : False
+seed              : 42
+sensor            : HICO
+subset            : 
+x_scalers         : 
+	('RobustScaler', [], {})
+y_scalers         : 
+	('LogTransformer', [], {})
+	('MinMaxScaler', [(-1, 1)], {})
+
+Configuration
+-------------
+LOO_CV            : False
+animate           : False
+avg_est           : False
+darktheme         : False
+data_loc          : D:/Data/Insitu
+data_xtrain_shape : (4931, 54)
+data_ytrain_shape : (4931, 1)
+dataset           : all
+datasets_hash     : 9f1ca81bdf87f809865e7663df52b7b56df99a5b68fa7bbee51a013e307c89c2
+filename          : None
+model_loc         : Weights
+n_redraws         : 50
+n_rounds          : 10
+no_load           : False
+no_save           : False
+plot_loss         : False
+save_data         : False
+save_stats        : False
+silent            : False
+sim_loc           : D:/Data/Simulated
+threshold         : None
+use_all_ratio     : False
+use_auc           : False
+use_boosting      : False
+use_excl_Rrs      : False
+use_kbest         : 0
+use_noise         : False
+use_ratio         : False
+use_sim           : False
+use_tchlfix       : False
+verbose           : False
+wavelengths       : [409 415 421 426 432 438 444 449 455 461 467 472 478 484 490 495 501 507
+ 512 518 524 530 535 541 547 553 558 564 570 575 581 587 593 598 604 610
+ 616 621 627 633 638 644 650 656 661 667 673 679 684 690 696 701 707 713]

@@ -1,0 +1,62 @@
+Created: 2021-06-02 13:47:36.982336
+Version: 2.0.0
+
+Dependencies
+------------
+align             : None
+batch             : 128
+benchmark         : False
+epsilon           : 0.001
+imputations       : 5
+l2                : 0.001
+lr                : 0.001
+model_lbl         : 
+n_hidden          : 100
+n_iter            : 10000
+n_layers          : 5
+n_mix             : 5
+no_bagging        : False
+product           : bb_p
+sat_bands         : False
+seed              : 42
+sensor            : MSI-SOLID
+use_sim           : True
+x_scalers         : 
+	('RobustScaler', [], {})
+y_scalers         : 
+	('LogTransformer', [], {})
+	('MinMaxScaler', [(-1, 1)], {})
+
+Configuration
+-------------
+LOO_CV            : False
+animate           : False
+avg_est           : False
+darktheme         : False
+data_loc          : D:/Data/Insitu
+data_xtrain_shape : (789385, 5)
+data_ytrain_shape : (789385, 5)
+dataset           : all
+datasets_hash     : 1a6d9c97798d8997f85ed9228296d533be6b47f97217709d7e2b628e21800220
+filename          : None
+model_loc         : Weights
+n_redraws         : 50
+n_rounds          : 10
+no_load           : False
+no_save           : False
+plot_loss         : False
+save_data         : False
+save_stats        : False
+silent            : False
+sim_loc           : D:/Data/Simulated
+threshold         : None
+use_all_ratio     : False
+use_auc           : False
+use_boosting      : False
+use_excl_Rrs      : False
+use_kbest         : 0
+use_noise         : False
+use_ratio         : False
+use_tchlfix       : False
+verbose           : False
+wavelengths       : [443 490 560 665 705]

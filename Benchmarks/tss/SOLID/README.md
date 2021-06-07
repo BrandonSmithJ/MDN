@@ -29,3 +29,5 @@ Rrs = np.random.random((6, 5)) # example data containing [6 samples, 5 wavelengt
 wavelengths = [443, 482, 561, 655, 865]
 tss = SOLID(Rrs, wavelengths, sensor)
 ```
+
+The previous SOLID version is provided at MDN/Benchmarks/tss/SOLID_old.zip. To use that version, simply unzip the folder into the same directory. We recommend using the latest version however, as the prior version is provided primarily for replicability.

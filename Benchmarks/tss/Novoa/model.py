@@ -24,7 +24,7 @@ def model(Rrs, wavelengths, *args, **kwargs):
 	hb = kwargs.get('hb', 0.120) # S_GH95+
 
 	p561 = np.pi * Rrs(561).flatten()
-	p655 = np.pi * Rrs(655).flatten()
+	p655 = np.pi * Rrs(665).flatten()
 	p865 = np.pi * Rrs(865, validate=False).flatten()
 
 	linear_green = a * p561
