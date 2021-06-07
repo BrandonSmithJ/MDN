@@ -7,12 +7,7 @@ import numpy as np
 import pickle as pkl 
 import hashlib 
 
-# try: from .Development.Removed.mdn_cpu import MDN
-# except: 
 from .model import MDN
-
-# try:    from .mdn  import MDN
-# except: from .mdn2 import MDN 
 from .meta  import get_sensor_bands, SENSOR_LABEL, ANCILLARY, PERIODIC
 from .utils import get_labels, get_data, generate_config, using_feature, split_data, _load_datasets
 from .metrics import performance, mdsa, sspb, msa
@@ -208,59 +203,6 @@ def print_dataset_stats(**kwargs):
 			}.items()]))
 
 
-def generate_estimates(args, bands, x_train, y_train, x_test, y_test, slices, locs, verbose=True, cache=None, **kwargs):
-	''' Helper function for generating MDN / benchmark estimates in a single
-		dictionary, with the option to cache the results. '''
-	if cache is not None:
-		cache = Path(cache)
-		assert(cache.suffix == '.pkl'), f'Must provide cache as path to destination .pkl file: {cache}'
-		cache.parent.mkdir(parents=True, exist_ok=True)
-
-		if cache.exists():
-			with cache.open('rb') as f:
-				return pkl.load(f)
-
-	# estimates, slices = get_estimates(args, x_train, y_train, x_test, y_test, slices, dataset_labels=locs[:,0], **kwargs)
-	# estimates = np.median(estimates, 0)
-	products  = args.product.split(',') 
-
-	# if verbose: 
-	# 	print_dataset_stats(estimates=estimates, label='MDN')
-	# 	print()
-
-	# 	labels = get_labels(bands, slices, y_test.shape[1])
-		
-	# 	if 0: 
-	# 		products += ['OHE']
-	# 		labels += ['OHE']
-	# 		slices['OHE'] = slice(1, None)
-	# 		from sklearn.metrics import f1_score,roc_auc_score
-	# 		print(f'F1: {f1_score(y_test[:, 1:].argmax(1), estimates[:, 1:].argmax(1), average="weighted"):.2f}')
-	# 		e = estimates[:,1:]
-	# 		e/= e.sum(1, keepdims=True)
-	# 		try: print(f'ROCAUC: {roc_auc_score(y_test[:,1:], e):.2f}')
-	# 		except: pass
-
-	benchmarks = run_benchmarks(args.sensor, x_test, y_test, x_train=x_train, y_train=y_train, 
-								slices={p:slices[p] for p in products}, verbose=False, 
-								# return_ml=len(products) == 1, kwargs_ml={'gridsearch': False})
-								return_ml=False and x_train is not None, kwargs_ml={'gridsearch': False})
-	# for p in products: benchmarks[p].update({'MDN' : estimates[..., slices[p]]})
-
-	if verbose: 
-		for p in benchmarks:
-			print(f'\n---------------------- {p} ----------------------')
-			errs = {method: mdsa(y_test[:, slices[p]], est) for method, est in benchmarks[p].items()}
-			keys = sorted(benchmarks[p].keys(), key=lambda k: errs[k], reverse=True)
-			for method in keys:
-				print( performance(method, y_test[:, slices[p]], benchmarks[p][method]) )
-	assert(0)
-	if cache is not None:
-		with cache.open('wb') as f:
-			pkl.dump(benchmarks, f)
-	return benchmarks
-
-
 def main():
 	args = get_args()
 
@@ -316,149 +258,12 @@ def main():
 		n_train = 0.5 if args.dataset != 'sentinel_paper' else 1000
 		x_data, y_data, slices, locs = get_data(args)
 
-		use_ohe = 0
-		if use_ohe:
-			from .transformers import DatasetFeatureTransformer 
-			dft = DatasetFeatureTransformer(locs[:,0])
-			x_data = dft.fit_transform(x_data)
-			# y_data = dft.fit_transform(y_data)
-		else: 
-			from .transformers import IdentityTransformer
-			dft = IdentityTransformer()
-		
-		# Leave-one-out cross-validation
-		if args.LOO_CV:
-			counts   = []
-			results  = dd(lambda: dd(lambda: dd(list)))
-			metrics  = [msa, mdsa, sspb]
-			datasets = [name for name, count in zip(*np.unique(locs[:,0], return_counts=True)) if count > 0]
-			print(f'Performing LOO validation with {len(datasets)} datasets')
-			counts2 = {}
-			frame = [['Dataset', 'Method', 'Product', 'Metric', 'Value']]
-			for name in datasets:
-				print(f'\n\n--------------------------------------------------\n{name}:')
-				setattr(args, 'model_lbl', f'LOO/{name}')
+		(x_train, y_train), (x_test, y_test) = split_data(x_data, y_data, n_train=n_train, seed=args.seed)
 
-				curr_set = locs[:,0] == name
-				kwargs   = {
-					'x_train' : x_data[~curr_set],
-					'y_train' : y_data[~curr_set],
-					'x_test'  : x_data[curr_set],
-					'y_test'  : y_data[curr_set],
-					'slices'  : slices,
-					'locs'    : locs,
-					'cache'   : None,# f'LOO_cache/{args.sensor}/{name}_newdata2.pkl',
-				}
-
-				# setattr(args, 'use_sim', True)
-				# x, y, s, l = get_data(args)
-				# setattr(args, 'use_sim', False)
-				# print(x.shape, y.shape)
-				# kwargs.update({
-				# 	# 'x_train' : np.append(kwargs['x_train'], x, 0), 
-				# 	# 'y_train' : np.append(kwargs['y_train'], y[:, s[args.product]], 0),
-				# 	'x_sim': x, 
-				# 	'y_sim': y[:, s[args.product]],
-				# 	# 'x_test'  : x_data[y_data.flatten() <= 100],
-				# 	# 'y_test'  : y_data[y_data.flatten() <= 100],
-				# 	# 'x_sim' : dft.transform(dft.inverse_transform(kwargs['x_train']), zeros=True),
-				# 	# 'y_sim' : kwargs['y_train'],
-				# })
-
-				counts.append(curr_set.sum())
-				counts2[name] = curr_set.sum()
-				benchmarks = generate_estimates(args, bands, **kwargs)
-
-				# assert(0)
-				for product in benchmarks:
-					for label, est in benchmarks[product].items():
-						for metric in metrics:
-							if label == 'OC3':
-								print(name, product, label)
-								print(kwargs['y_test'][:,slices[product]].shape, est.shape)
-								print(slices)
-								print(kwargs['y_test'][:,slices[product]][0], est[0])
-								print(kwargs['x_test'][0])
-								print(mdsa(kwargs['y_test'][:,slices[product]].flatten(), est.flatten()))
-								assert(0)
-							try: val = metric(kwargs['y_test'][:,slices[product]].flatten(), est.flatten())
-							except Exception as e: 
-								val = np.nan
-							results[label][product][metric.__name__].append(val)
-							frame.append([name, label, product, metric.__name__, val])
-
-			totals = {}
-			for label in sorted(results.keys(), key=lambda k: np.nanmean(results[k]['chl']['MdSA']), reverse=True):
-				a = max(map(len, results[label]['chl'].values()))
-				print(f'\n{label} ({a} valid datasets)')
-				for product in sorted(results[label]):
-					if max(map(len, results[label][product].values())):
-						print(f'Product: {product}')
-						print(f'Mean     | ' + '  '.join([f'{k}: {np.nanmean(v):.1f}' for k,v in results[label][product].items()]))
-						print(f'Median   | ' + '  '.join([f'{k}: {np.nanmedian(v):.1f}' for k,v in results[label][product].items()]))
-						print(len(np.all(np.isfinite(np.array(list(results[label][product].values()))), 0)), len(counts))
-						print(f'Weighted | ' + '  '.join([f'{k}: {np.nansum(np.array(v) * np.array(counts)/sum(np.all(np.isfinite(np.array(list(results[label][product].values()))), 0) * np.array(counts))):.1f}' for k,v in results[label][product].items()]))
-						totals[(label, product)] = sum(np.all(np.isfinite(np.array(list(results[label][product].values()))), 0) * np.array(counts))
-			
-			import pandas as pd 
-			import seaborn as sns
-			import matplotlib.pyplot as plt 
-			frame = pd.DataFrame(frame[1:], columns=frame[0])
-			frame['count2'] = np.array([counts2[row['Dataset']] if np.isfinite(row['Value']) else 0 for _, row in frame.iterrows()])
-			frame['count'] = np.array([counts2[row['Dataset']] for _, row in frame.iterrows()])
-			frame['total'] = np.array([totals[(row['Method'], row['Product'])] for _, row in frame.iterrows()])
-			frame['weight'] = np.array([counts2[row['Dataset']] / totals[(row['Method'], row['Product'])] for _, row in frame.iterrows()])
-			print(frame[(frame['Method'] == 'MDN') & (frame['Product'] == 'chl') & (frame['Metric'] == 'MSA')])
-			print(frame[(frame['Method'] == 'MDN') & (frame['Product'] == 'chl') & (frame['Metric'] == 'MSA')].sum(0))
-
-			assert(0)
-			# frame.to_csv('LOO_results.csv', index=False)
-			v = frame.copy()
-			v['Value'] *= np.array([counts2[row['Dataset']] / totals[(row['Method'], row['Product'])] for _, row in v.iterrows()])
-			v = v.groupby(['Method', 'Product', 'Metric']).sum()#.sort_values(['Product', 'Metric', 'Value'])#.to_csv('weighted_results.csv')
-			v['Median'] = frame.groupby(['Method', 'Product', 'Metric']).median()
-			v['Mean'] = frame.groupby(['Method', 'Product', 'Metric']).mean()
-			v['Weighted'] = v['Value']
-			v = v.drop(columns=['Value'])
-			v.sort_values(['Product', 'Metric', 'Median']).to_csv('averaged_results.csv')
-			# frame.groupby(['Method', 'Product', 'Metric']).mean().sort_values(['Product', 'Metric', 'Value']).to_csv('mean_results.csv')
-			# frame.groupby(['Method', 'Product', 'Metric']).median().sort_values(['Product', 'Metric', 'Value']).to_csv('median_results.csv')
-			assert(0)
-			frame = frame[~frame['Method'].isin(['Gurlin_3band', 'OCx', 'GIOP', 'Mishra_NDCI', 'FLH', 'OC2', 'Novoa_old', 'SOLID_old', 'Mishra_modelled_NDCI', 'Gurlin_2band', 'Gilerson_2band', 'Moses_2band', 'OC3', 'Gons_2band'])]
-			frame = frame[~frame['Dataset'].isin(['GreenBay2013'])]
-
-			print(frame)
-			# f, ax = plt.subplots(3,1, figsize=(15, 15))
-			# for i, product in enumerate(['chl', 'tss', 'cdom']):
-			# 	sns.barplot(data=frame[(frame['Product'] == product) & (frame['Metric'] == 'MdSA')], y='Dataset', x='Value', hue='Method', ax=ax[i])
-			# 	ax[i].set_title(product)
-			# 	ax[i].set_xlabel('')
-			# 	ax[i].set_xscale('log')
-			# ax[-1].set_xlabel('MdSA')
-			# plt.show()
-
-			for product in ['chl', 'tss', 'cdom']:
-				f, ax = plt.subplots(1,1, figsize=(15, 10))
-				f = frame[(frame['Product'] == product) & (frame['Metric'] == 'MdSA')]
-				# if product == 'chl':
-				# 	f = f[~f['Dataset'].isin(['CedricCABay', 'CedricGoM', 'CedricPlumIsland', 'GreenBay2013', 'Hubert', 'SeaSWIR'])]
-				# else:
-				all_nan = f.groupby('Dataset').sum() == 0
-				f = f[~f['Dataset'].isin(all_nan.index.to_numpy()[all_nan.values.flatten()])]
-				sns.barplot(data=f, y='Dataset', x='Value', hue='Method', ax=ax)
-				ax.set_title(product)
-				# ax.set_xscale('log')
-				ax.set_xlabel('MdSA')
-				plt.show()
-		else:
-			(x_train, y_train), (x_test, y_test) = split_data(x_data, y_data, n_train=n_train, seed=args.seed)
-
-			# if use_ohe:
-			# 	y_test = dft.transform(dft.inverse_transform(y_test)) # Replace set labels with zero vectors
-			benchmarks = generate_estimates(args, bands, x_train, y_train, x_test, y_test, slices, locs)
-			labels     = get_labels(bands, slices, y_test.shape[1])
-			products   = args.product.split(',')
-			plot_scatter(y_test, benchmarks, bands, labels, products, args.sensor)
+		benchmarks = generate_estimates(args, bands, x_train, y_train, x_test, y_test, slices, locs)
+		labels     = get_labels(bands, slices, y_test.shape[1])
+		products   = args.product.split(',')
+		plot_scatter(y_test, benchmarks, bands, labels, products, args.sensor)
 
 	# Otherwise, train a model with all data (if not already existing)
 	else:
