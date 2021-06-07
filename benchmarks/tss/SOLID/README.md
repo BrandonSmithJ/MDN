@@ -19,15 +19,20 @@ SOLID may be used to estimate TSS for the missions:
 The following code snippet shows how to use SOLID:
 ```
 # sensor = "<OLI, MSI, VI, OLCI, MOD>"
-# Rrs = "<Your remote sensing reflectance [1/sr] data, shaped [N samples, N wavelengths]>"
-# wavelengths = "<Wavelengths which are contained in the Rrs data>"
+# Rrs    = "<Your remote sensing reflectance [1/sr] data, shaped [N samples, N wavelengths]>"
+# waves  = "<Wavelengths which are contained in the Rrs data>"
 # For example:
-from MDN.Benchmarks.tss.SOLID.model import model as SOLID
-import numpy as np 
-sensor = "OLI"
-Rrs = np.random.random((6, 5)) # example data containing [6 samples, 5 wavelengths]
-wavelengths = [443, 482, 561, 655, 865]
-tss = SOLID(Rrs, wavelengths, sensor)
-```
 
-The previous SOLID version is provided at MDN/Benchmarks/tss/SOLID_old.zip. To use that version, simply unzip the folder into the same directory. We recommend using the latest version however, as the prior version is provided primarily for replicability.
+from MDN.benchmarks.tss.SOLID.model import model as SOLID
+import numpy as np 
+
+sensor = "OLI"
+waves  = [443, 482, 561, 655, 865]
+Rrs    = np.random.random((6, len(waves)) # example data containing [6 samples, 5 wavelengths]
+tss    = SOLID(Rrs, waves, sensor)
+
+# Image estimates may also be generated via the following:
+from MDN import image_estimates, get_tile_data
+waves, Rrs = get_tile_data("path/to/my/tile.nc", sensor, allow_neg=False) 
+tss, idxs  = image_estimates(Rrs, function=SOLID, sensor=sensor, wavelengths=waves)
+```
