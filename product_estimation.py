@@ -174,6 +174,7 @@ def image_estimates(data, sensor=None, function=apply_model, rhos=False, anc=Fal
 	estimate = function(im_data, sensor=sensor, **kwargs) if im_data.size else np.zeros((0, 1))
 
 	# Need to handle function which return extra information (e.g. a dictionary mapping output feature slices)
+	remaining = None
 	if isinstance(estimate, tuple):
 		estimate, *remaining = estimate 
 
@@ -184,7 +185,7 @@ def image_estimates(data, sensor=None, function=apply_model, rhos=False, anc=Fal
 	est_data = est_data.reshape(im_shape + est_data.shape[-1:])
 
 	# Let the user handle the extra information of the function they passed, if there was any
-	if len(remaining):
+	if remaining is not None and len(remaining):
 		if len(remaining) == 1: 
 			remaining = remaining[0]
 		return est_data, remaining
