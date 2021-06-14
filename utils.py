@@ -92,13 +92,21 @@ class CustomUnpickler(pkl.Unpickler):
 	_warned       = False
 
 	def find_class(self, module, name):
-		if name in self._transformers:
+		# pathlib/pickle doesn't correctly deal with instantiating
+		# a system-specific path on the opposite system (e.g. WindowsPath
+		# on a linux OS). Instead, we just provide the general Path class. 
+		if name in ['WindowsPath', 'PosixPath']:
+			return Path 
+
+		elif name in self._transformers:
 			module   = Path(__file__).parent.stem
 			imported = import_module(f'{module}.transformers.{name}')
 			return getattr(imported, name)
+			
 		elif name == 'TransformerPipeline':
 			from .transformers import TransformerPipeline
 			return TransformerPipeline
+
 		return super().find_class(module, name)
 
 def store_pkl(filename, output):
