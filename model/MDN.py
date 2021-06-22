@@ -313,10 +313,10 @@ class MDN:
 		output_layer = MixtureLayer(**mixture_kwargs)
 
 		# Define yscaler.inverse_transform as a tensorflow function, and estimate extraction from outputs
-		yscaler_a   = self.scalery.scalers[-1].min_
-		yscaler_b   = self.scalery.scalers[-1].scale_
-		inv_scaler  = lambda y: tf.math.exp((tf.reshape(y, shape=[-1]) - yscaler_a) / yscaler_b) 
-		extract_est = lambda z: self._get_top_estimate( self._parse_outputs(z) )
+		# yscaler_a   = self.scalery.scalers[-1].min_
+		# yscaler_b   = self.scalery.scalers[-1].scale_
+		# inv_scaler  = lambda y: tf.math.exp((tf.reshape(y, shape=[-1]) - yscaler_a) / yscaler_b) 
+		# extract_est = lambda z: self._get_top_estimate( self._parse_outputs(z) )
 
 		optimizer  = tf.keras.optimizers.Adam(self.lr)
 		self.model = tf.keras.Sequential(model_layers + [output_layer], name=self.model_name)
