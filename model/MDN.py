@@ -428,7 +428,7 @@ class MDN:
 		# https://faculty.ucmerced.edu/mcarreira-perpinan/papers/cs-99-03.pdf
 		s, u, v = tf.linalg.svd(sigma)
 		rho = 2**0.5 * tf.math.erfinv(level ** (1./self.n_targets)) 
-		return rho * 2 * s ** 0.5
+		return tf.cast(rho, tf.float32) * 2 * s ** 0.5
 
 	def _get_top_confidence(self, coefs, level=0.9):
 		prior, mu, sigma = coefs
