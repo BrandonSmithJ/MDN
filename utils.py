@@ -1,5 +1,5 @@
 from .meta import get_sensor_bands, ANCILLARY, PERIODIC
-from .parameters import update, hypers, flags
+from .parameters import update, hypers, flags, get_args
 from .__version__ import __version__
 
 from collections import defaultdict as dd
@@ -213,14 +213,14 @@ def mask_land(data, bands, threshold=0.2, verbose=False):
 
 
 @ignore_warnings
-def _get_tile_wavelengths(nc_data, key, sensor, allow_neg=True, landmask=False):
+def _get_tile_wavelengths(nc_data, key, sensor, allow_neg=True, landmask=False, args=None):
 	''' Return the Rrs/rhos data within the netcdf file, for wavelengths of the given sensor '''
 	has_key = lambda k: any([k in v for v in nc_data.variables])
 	wvl_key = f'{key}_' if has_key(f'{key}_') or key != 'Rrs' else 'Rw' # Polymer stores Rw=Rrs*pi
 
 	if has_key(wvl_key):
 		avail = get_wvl(nc_data, wvl_key)
-		bands = [closest_wavelength(b, avail) for b in get_sensor_bands(sensor)]
+		bands = [closest_wavelength(b, avail) for b in get_sensor_bands(sensor, args)]
 		div   = np.pi if wvl_key == 'Rw' else 1
 		data  = np.ma.stack([nc_data[f'{wvl_key}{b}'][:] / div for b in bands], axis=-1)
 		
@@ -230,7 +230,7 @@ def _get_tile_wavelengths(nc_data, key, sensor, allow_neg=True, landmask=False):
 		return bands, data.filled(fill_value=np.nan)
 	return [], np.array([])
 
-def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
+def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False, **kwargs):
 	''' Gather the correct Rrs/rhos bands from a given scene, as well as ancillary features if necessary '''
 	from netCDF4 import Dataset
 
@@ -242,6 +242,7 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 	# Some sensors use different bands for their rhos models 
 	if rhos and '-rho' not in sensor: sensor += '-rho'
 
+	args = get_args(sensor=sensor, **kwargs)
 	for filename in filenames:
 		with Dataset(filename, 'r') as nc_data:
 			if 'geophysical_data' in nc_data.groups.keys():
@@ -250,7 +251,7 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 			for feature in features:
 				if feature not in data:
 					if feature in ['Rrs', 'rhos']:
-						bands, band_data = _get_tile_wavelengths(nc_data, feature, sensor, allow_neg, landmask=rhos)
+						bands, band_data = _get_tile_wavelengths(nc_data, feature, sensor, allow_neg, landmask=rhos, args=args)
 	
 						if len(bands) > 0: 
 							assert(len(band_data.shape) == 3), \
