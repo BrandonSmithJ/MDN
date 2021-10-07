@@ -10,7 +10,7 @@ from tqdm import trange
 
 import pickle as pkl
 import numpy as np 
-import hashlib, re, warnings, functools
+import hashlib, re, warnings, functools, sys
 
 
 def ignore_warnings(func):
@@ -369,9 +369,12 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 		''' Error handling wrapper over np.loadtxt, with the addition of wavelength selection'''
 		dloc = Path(loc).joinpath(f'{name}.csv')
 		
-		# TSS / TSM are synonymous
+		# TSS / TSM / SPM are synonymous
 		if 'tss' in name and not dloc.exists():
 			dloc = Path(loc).joinpath(f'{name.replace("tss","tsm")}.csv')
+
+			if not dloc.exists():
+				dloc = Path(loc).joinpath(f'{name.replace("tsm","spm")}.csv')
 
 		# CDOM is just an alias for a_cdom(443) or a_g(443)
 		if 'cdom' in name and not dloc.exists():
@@ -382,7 +385,7 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 			required_wvl = np.array(required_wvl).flatten()
 			assert(dloc.exists()), (f'Key {name} does not exist at {loc} ({dloc})') 
 
-			data = np.loadtxt(dloc, delimiter=',', dtype=float if name not in ['../Dataset', '../meta'] else str, comments=None)
+			data = np.loadtxt(dloc, delimiter=',', dtype=float if name not in ['../Dataset', '../meta', '../datetime'] else str, comments=None)
 			if len(data.shape) == 1: data = data[:, None]
 
 			if data.shape[1] > 1 and data.dtype.type is not np.str_:
@@ -425,7 +428,7 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 		# First, validate available wavelengths are within the margin of the required wavelengths
 		valid = np.array([True] * len(required_wvl))
 		if len(wvls) != len(required_wvl):
-			valid = np.abs(wvls - np.atleast_2d(required_wvl)).min(1) < margin
+			valid = np.abs(wvls - np.atleast_2d(required_wvl)).min(1) <= margin
 			assert(valid.sum() == len(required_wvl)), [wvls[valid].flatten(), required_wvl]
 
 		# Then, ensure the order of the available wavelengths are the same as the required
@@ -446,7 +449,7 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 	for loc in locs:
 		try:
 			loc_data = [loadtxt(key, loc, wavelengths) for key in keys]
-			print(f'\tN={len(loc_data[0]):>5} | {loc.parts[-1]} / {loc.parts[-2]} ({[np.isfinite(ld).all(1).sum() for ld in loc_data[1:]]})')
+			print(f'\tN={len(loc_data[0]):>5} | {loc.parts[-1]} / {loc.parts[-2]} ({[np.isfinite(ld).all(1).sum() if ld.dtype.type is not np.str_ else len(ld) for ld in loc_data[1:]]})')
 			assert(all([len(l) in [len(loc_data[0]), 0] for l in loc_data])), dict(zip(keys, map(np.shape, loc_data)))
 
 			if all([l.shape[1] == 0 for l in loc_data[(1 if len(loc_data) > 1 else 0):]]):

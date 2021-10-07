@@ -189,7 +189,6 @@ def image_estimates(data, sensor=None, function=apply_model, rhos=False, anc=Fal
 	return est_data
 
 
-
 def print_dataset_stats(**kwargs):
 	''' Print datasets shape & min / max stats per feature '''
 	label = kwargs.pop('label', '')
@@ -206,6 +205,15 @@ def print_dataset_stats(**kwargs):
 				print('First sample:')
 				print(arr.head(1).to_string(index=False), '\n---------------------------\n')
 
+
+def generate_estimates(args, bands, x_train, y_train, x_test, y_test, slices, locs=None):
+    estimates, slices = get_estimates(args, x_train, y_train, x_test, y_test, slices)
+    estimates = np.median(estimates, 0)
+    benchmarks = run_benchmarks(args.sensor, x_test, y_test, x_train, y_train, slices, args)
+    for p in slices: 
+        if p not in benchmarks: benchmarks[p] = {}
+        benchmarks[p].update({'MDN' : estimates[..., slices[p]]})
+    return benchmarks
 
 
 def main():

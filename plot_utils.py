@@ -280,7 +280,7 @@ def default_dd(d={}, f=lambda k: k):
 
 
 @ignore_warnings
-def plot_scatter(y_test, benchmarks, bands, labels, products, sensor, title=None, methods=None, n_col=3):
+def plot_scatter(y_test, benchmarks, bands, labels, products, sensor, title=None, methods=None, n_col=3, img_outlbl=''):
 	import matplotlib.patheffects as pe 
 	import matplotlib.ticker as ticker
 	import matplotlib.pyplot as plt 
@@ -290,7 +290,7 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor, title=None
 	folder.mkdir(exist_ok=True, parents=True)
 
 	product_labels = default_dd({
-		'chl' : 'TChl\\textit{a}',
+		'chl' : 'Chl\\textit{a}',
 		'aph' : '\\textit{a}_{ph}',
 		'tss' : 'TSS',
 		'cdom': '\\textit{a}_{CDOM}',
@@ -307,7 +307,7 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor, title=None
 		'MDN' : 'MDN_{A}',
 	})
 
-	products = np.atleast_1d(products)
+	products = [p for i,p in enumerate(np.atleast_1d(products)) if i < y_test.shape[-1]]
 
 	plt.rc('text', usetex=True)
 	plt.rcParams['mathtext.default']='regular'
@@ -494,7 +494,7 @@ def plot_scatter(y_test, benchmarks, bands, labels, products, sensor, title=None
 			ax.grid('on', alpha=0.3)
 
 	u_label  = ",".join([o.split('_')[0] for o in plot_order]) if len(plot_order) < 10 else f'{n_row}x{n_col}'
-	filename = folder.joinpath(f'{",".join(products)}_{sensor}_{n_pts}test_{u_label}.png')
+	filename = folder.joinpath(f'{img_outlbl}{",".join(products)}_{sensor}_{n_pts}test_{u_label}.png')
 	plt.tight_layout()
 	# plt.subplots_adjust(wspace=0.35)
 	plt.savefig(filename.as_posix(), dpi=100, bbox_inches='tight', pad_inches=0.1,)

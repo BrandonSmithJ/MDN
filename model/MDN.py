@@ -170,7 +170,6 @@ class MDN:
 
 		for i in trange(0, len(X), chunk_size, disable=not self.verbose):
 			chunk_est, chunk_coef = self._predict_chunk(X[i:i+chunk_size], return_coefs=True, **kwargs)
-
 			partial_coefs.append(chunk_coef)
 			partial_estim.append( np.array(chunk_est, ndmin=3) )
 
@@ -259,7 +258,7 @@ class MDN:
 				callbacks = []
 				model_kws = {
 					'batch_size' : self.batch, 
-					'epochs'     : int(self.n_iter / (len(X) / self.batch)),
+					'epochs'     : max(1, int(self.n_iter / max(1, len(X) / self.batch))),
 					'verbose'    : 0, 
 					'callbacks'  : callbacks,
 				}
