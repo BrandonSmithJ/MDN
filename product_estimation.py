@@ -9,7 +9,7 @@ import hashlib
 
 from .model import MDN
 from .meta  import get_sensor_bands, SENSOR_LABEL, ANCILLARY, PERIODIC
-from .utils import get_labels, get_data, generate_config, using_feature, split_data, _load_datasets
+from .utils import get_labels, get_data, generate_config, using_feature, split_data, _load_datasets, compress
 from .metrics import performance, mdsa, sspb, msa
 from .plot_utils import plot_scatter
 from .benchmarks import run_benchmarks
@@ -123,6 +123,9 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 				print(f'--- Done round {round_num} ---\n')
 
 		if hasattr(model, 'session'): model.session.close()
+
+	# Create compressed model archive
+	compress(model_path)
 
 	if len(outputs) == 1:
 		outputs = list(outputs.values())[0]

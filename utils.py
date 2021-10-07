@@ -10,7 +10,7 @@ from tqdm import trange
 
 import pickle as pkl
 import numpy as np 
-import hashlib, re, warnings, functools, sys
+import hashlib, re, warnings, functools, sys, zipfile
 
 
 def ignore_warnings(func):
@@ -90,6 +90,22 @@ def get_labels(wavelengths, slices, n_out=None):
 	return [k + (f'{wavelengths[i]:.0f}' if (v.stop - v.start) > 1 else '') 
 			for k,v in sorted(slices.items(), key=lambda s: s[1].start)
 			for i   in range(v.stop - v.start)][:n_out]	
+
+
+def compress(path, overwrite=False):
+	''' Compress a folder into a .zip archive '''
+	if overwrite or not path.with_suffix('.zip').exists():
+		with zipfile.ZipFile(path.with_suffix('.zip'), 'w', zipfile.ZIP_DEFLATED) as zf:
+			for item in path.rglob('*'):
+				zf.write(item, item.relative_to(path))
+
+
+def uncompress(path, overwrite=False):
+	''' Uncompress a .zip archive '''
+	if overwrite or not path.exists():
+		if path.with_suffix('.zip').exists():
+			with zipfile.ZipFile(path.with_suffix('.zip'), 'r') as zf:
+				zf.extractall(path)
 
 
 class CustomUnpickler(pkl.Unpickler):
@@ -329,7 +345,8 @@ def generate_config(args, create=True, verbose=True):
 	uid    = hashlib.sha256(h_str.encode('utf-8')).hexdigest()
 	folder = root.joinpath(uid)
 	c_file = folder.joinpath('config')
-
+	uncompress(folder) # Unzip the archive if necessary
+	
 	if args.verbose: 
 		print(f'Using model path {folder}')
 
