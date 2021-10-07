@@ -50,6 +50,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 		'threshold'           : getattr(args, 'threshold', None),
 		'confidence_interval' : getattr(args, 'CI', None),
 		'use_gpu'             : getattr(args, 'use_gpu', False),
+		'chunk_size'          : getattr(args, 'chunk_size', 1e5),
 		'return_coefs'        : True,
 	}
 
@@ -157,8 +158,9 @@ def image_estimates(data, sensor=None, function=apply_model, rhos=False, anc=Fal
 		f'Requested sensor {sensor} unknown. Must be one of: {list(SENSOR_LABEL.keys())}')
 	assert(len(data.shape) == 3), (
 		f'Expected data to have 3 dimensions (height, width, feature). Found shape: {data.shape}')
-	
-	expected_features = len(get_sensor_bands(sensor)) + (len(ANCILLARY)+len(PERIODIC) if anc or rhos else 0)
+
+	args = get_args(sensor=sensor, **kwargs)
+	expected_features = len(get_sensor_bands(sensor, args)) + (len(ANCILLARY)+len(PERIODIC) if anc or rhos else 0)
 	assert(data.shape[-1] == expected_features), (
 		f'Got {data.shape[-1]} features; expected {expected_features} features for sensor {sensor}')
 	
@@ -193,14 +195,17 @@ def print_dataset_stats(**kwargs):
 	label = kwargs.pop('label', '')
 	for k, arr in kwargs.items():
 		if arr is not None:
-			arr = np.array(arr)
-			print(f'\n{label} {k.title()}'.strip()+'\n\t'.join(['']+[f'{k}: {v}' for k, v in {
-				'Shape'   : arr.shape,
-				'N Valid' : getattr(np.isfinite(arr).sum(0), 'min' if arr.shape[1] > 10 else 'tolist')(),
-				'Minimum' : list(np.nanmin(arr, 0).round(2)),
-				'Maximum' : list(np.nanmax(arr, 0).round(2))
-				# 'Min,Max' : list(zip(np.nanmin(arr, 0).round(2), np.nanmax(arr, 0).round(2))),
-			}.items()]))
+			print(f'\n{label} {k.title()}'.strip()+'\n\t'.join(['']+[f'{k}: {v}'.replace("'", "") for k, v in {
+				'Shape'   : np.array(arr).shape,
+				'N Valid' : getattr(np.isfinite(arr).sum(0), 'min' if np.array(arr).shape[1] > 10 else 'tolist')(),
+				'Minimum' : [f'{a:>6.2f}' for a in np.nanmin(arr, 0)],
+				'Maximum' : [f'{a:>6.2f}' for a in np.nanmax(arr, 0)],
+			}.items()]), '\n')
+
+			if hasattr(arr, 'head'):
+				print('First sample:')
+				print(arr.head(1).to_string(index=False), '\n---------------------------\n')
+
 
 
 def main():
