@@ -50,21 +50,27 @@ def get_wvl(nc_data, key):
 	return np.array(sorted([w for w in wvl if w is not None]))
 
 
-def line_messages(messages):
+def line_messages(messages, nbars=1):
 	''' 
 	Allow multiline message updates via tqdm. 
 	Need to call print() after the tqdm loop, 
 	equal to the number of messages which were
 	printed via this function (to reset cursor).
 	
+	nbars is the number of tqdm bars the line
+	messages come after.
+
 	Usage:
+		nbars = 2
 		for i in trange(5):
-			messages = [i, i/2, i*2]
-			line_messages(messages)
-		for _ in range(len(messages)): print()
+			for j in trange(5, leave=False):
+				messages = [i, i/2, i*2]
+				line_messages(messages, nbars)
+		for _ in range(len(messages) + nbars - 1): print()
 	'''
-	for i, m in enumerate(messages, 1):
-		trange(1, desc=str(m), position=i, bar_format='{desc}')
+	for _ in range(nbars): print()
+	for m in messages: print('\033[K' + str(m))
+	sys.stdout.write('\x1b[A'.join([''] * (nbars + len(messages) + 1)))
 
 
 def get_labels(wavelengths, slices, n_out=None):

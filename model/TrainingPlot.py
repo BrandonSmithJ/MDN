@@ -21,8 +21,13 @@ class TrainingPlot:
 		self.model = model
 		self.data  = data
 
+		# Sample a limited number of training samples to plot
+		n_samples = len(self.data['train']['x'])
+		self._idx = np.random.choice(range(n_samples), min(n_samples, 10000), replace=False)
+
+
 	def setup(self):
-		self.train_test   = np.append(self.data['train']['x_t'], self.data['test']['x_t'], 0)	
+		self.train_test   = np.append(self.data['train']['x_t'][self._idx], self.data['test']['x_t'], 0)	
 		self.train_losses = dd(list)
 		self.test_losses  = dd(list)
 		self.model_losses = []
@@ -68,7 +73,7 @@ class TrainingPlot:
 		model = self.model
 		if hasattr(model, 'session'):
 			(prior, mu, sigma), est, avg = model.session.run([model.coefs, model.most_likely, model.avg_estimate], feed_dict={model.x: self.train_test})
-			train_loss = model.session.run(model.neg_log_pr, feed_dict={model.x: self.data['train']['x_t'], model.y: self.data['train']['y_t']})				
+			train_loss = model.session.run(model.neg_log_pr, feed_dict={model.x: self.data['train']['x_t'][self._idx], model.y: self.data['train']['y_t'][self._idx]})				
 			test_loss  = model.session.run(model.neg_log_pr, feed_dict={model.x: self.data['test' ]['x_t'], model.y: self.data['test' ]['y_t']})
 		else:
 			# mix = model.model.layers[-1]
@@ -76,7 +81,7 @@ class TrainingPlot:
 			coefs  = prior, mu, sigma = model.get_coefs(tt_out)
 			est = model._get_top_estimate(coefs).numpy()
 			avg = model._get_avg_estimate(coefs).numpy()
-			train_loss = model.loss(self.data['train']['y_t'], model(self.data['train']['x_t'])).numpy()
+			train_loss = model.loss(self.data['train']['y_t'][self._idx], model(self.data['train']['x_t'][self._idx])).numpy()
 			test_loss  = model.loss(self.data['test' ]['y_t'], model(self.data['test' ]['x_t'])).numpy()
 			prior = prior.numpy()
 			mu    = mu.numpy()
@@ -86,14 +91,14 @@ class TrainingPlot:
 		est = model.scalery.inverse_transform(est)
 		avg = model.scalery.inverse_transform(avg)
 
-		n_xtrain  = len(self.data['train']['x_t'])
+		n_xtrain  = len(self._idx)
 		train_est = est[:n_xtrain ]
 		train_avg = avg[:n_xtrain ]
 		test_est  = est[ n_xtrain:]
 		test_avg  = avg[ n_xtrain:]
 
 		for metric in plot_metrics:
-			self.train_losses[metric.__name__].append([metric(y1, y2) for y1, y2 in zip(self.data['train']['y'].T, train_est.T)])
+			self.train_losses[metric.__name__].append([metric(y1, y2) for y1, y2 in zip(self.data['train']['y'][self._idx].T, train_est.T)])
 			self.test_losses[ metric.__name__].append([metric(y1, y2) for y1, y2 in zip(self.data['test' ]['y'].T, test_est.T)])
 			
 		self.model_losses.append([train_loss, leqznan(test_est), test_loss])
@@ -101,8 +106,10 @@ class TrainingPlot:
 		test_mixes = np.argmax(prior, 1)[n_xtrain:]
 		
 		if model.verbose:
-			line_messages([performance(  lbl, y1, y2) for lbl, y1, y2 in zip(self.labels, self.data['test']['y'].T, test_est.T)] + 
-						  [performance('avg', y1, y2) for lbl, y1, y2 in zip(self.labels, self.data['test']['y'].T, test_avg.T)])
+			messages = zip( [performance(  lbl, y1, y2) for lbl, y1, y2 in zip(self.labels, self.data['test']['y'].T, test_est.T)], 
+							[performance('avg', y1, y2) for lbl, y1, y2 in zip(self.labels, self.data['test']['y'].T, test_avg.T)])
+			self.messages = [m for msg in messages for m in msg]
+			line_messages(self.messages, nbars=2)
 
 		net_loss, zero_cnt, test_loss = np.array(self.model_losses).T
 		[ax.cla() for ax in self.axes]
@@ -110,18 +117,20 @@ class TrainingPlot:
 		# Top two plots, showing training progress
 		for axi, (ax, metric) in enumerate(zip(self.axes[:len(plot_metrics)], plot_metrics)):
 			name = metric.__name__
-			ax.plot(np.array(self.train_losses[name]), ls='--', alpha=0.5)
+			line = ax.plot(np.array(self.train_losses[name]), ls='--', alpha=0.5)
+			ax.set_prop_cycle(plt.cycler('color', [l.get_color() for l in line]))
 			ax.plot(np.array(self.test_losses[name]), alpha=0.8)
 			ax.set_ylabel(metric.__name__, fontsize=8)
+			ax.set_yscale('log')
 
 			if axi == 0: 
 				n_targets = self.data['train']['y_t'].shape[1]
-				ax.legend(self.labels, bbox_to_anchor=(1.2, 1 + .1*(n_targets//6 + 1)), 
-									   ncol=min(6, n_targets), fontsize=8, loc='center')
+				ax.legend(self.labels, bbox_to_anchor=(1.22, 1.1 + .1*(n_targets//6 + 1)), 
+									   ncol=min(6, n_targets), fontsize=8, loc='center', title='Training')
 		
 		axi = len(plot_metrics)
-		self.axes[axi].plot(net_loss, ls='--', color='w' if self.args.darktheme else 'k')
-		self.axes[axi].plot(test_loss, ls='--', color='gray')
+		self.axes[axi].plot(net_loss, ls='--', color='gray')
+		self.axes[axi].plot(test_loss, color='w' if self.args.darktheme else 'k')
 		self.axes[axi].plot([np.argmin(test_loss)], [np.min(test_loss)], 'rx')
 		self.axes[axi].set_ylabel('Network Loss', fontsize=8)
 		self.axes[axi].tick_params(labelsize=8)
@@ -146,7 +155,7 @@ class TrainingPlot:
 			ax.set_title(lbl, fontsize=8)			
 			ax.set_xscale('log')
 			ax.set_yscale('log')
-			minlim = max(min(self.data['test']['y'][:, yidx].min(), test_est[:, yidx].min()), 1e-3)
+			minlim = max(min(self.data['test']['y'][:, yidx].min(), test_est[:, yidx].min()), 1e-6)
 			maxlim = min(max(self.data['test']['y'][:, yidx].max(), test_est[:, yidx].max()), 2000)
 		
 			if np.all(np.isfinite([minlim, maxlim])): 
@@ -262,3 +271,6 @@ class TrainingPlot:
 		# input('continue?')
 		plt.ioff()
 		plt.close()
+
+		if self.model.verbose:
+			print('\n' * (len(self.messages) + 1))
