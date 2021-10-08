@@ -1,5 +1,5 @@
 from .meta import get_sensor_bands, ANCILLARY, PERIODIC
-from .parameters import update, hypers, flags
+from .parameters import update, hypers, flags, get_args
 from .__version__ import __version__
 
 from collections import defaultdict as dd
@@ -10,7 +10,7 @@ from tqdm import trange
 
 import pickle as pkl
 import numpy as np 
-import hashlib, re, warnings, functools
+import hashlib, re, warnings, functools, sys, zipfile
 
 
 def ignore_warnings(func):
@@ -50,21 +50,27 @@ def get_wvl(nc_data, key):
 	return np.array(sorted([w for w in wvl if w is not None]))
 
 
-def line_messages(messages):
+def line_messages(messages, nbars=1):
 	''' 
 	Allow multiline message updates via tqdm. 
 	Need to call print() after the tqdm loop, 
 	equal to the number of messages which were
 	printed via this function (to reset cursor).
 	
+	nbars is the number of tqdm bars the line
+	messages come after.
+
 	Usage:
+		nbars = 2
 		for i in trange(5):
-			messages = [i, i/2, i*2]
-			line_messages(messages)
-		for _ in range(len(messages)): print()
+			for j in trange(5, leave=False):
+				messages = [i, i/2, i*2]
+				line_messages(messages, nbars)
+		for _ in range(len(messages) + nbars - 1): print()
 	'''
-	for i, m in enumerate(messages, 1):
-		trange(1, desc=str(m), position=i, bar_format='{desc}')
+	for _ in range(nbars): print()
+	for m in messages: print('\033[K' + str(m))
+	sys.stdout.write('\x1b[A'.join([''] * (nbars + len(messages) + 1)))
 
 
 def get_labels(wavelengths, slices, n_out=None):
@@ -84,6 +90,22 @@ def get_labels(wavelengths, slices, n_out=None):
 	return [k + (f'{wavelengths[i]:.0f}' if (v.stop - v.start) > 1 else '') 
 			for k,v in sorted(slices.items(), key=lambda s: s[1].start)
 			for i   in range(v.stop - v.start)][:n_out]	
+
+
+def compress(path, overwrite=False):
+	''' Compress a folder into a .zip archive '''
+	if overwrite or not path.with_suffix('.zip').exists():
+		with zipfile.ZipFile(path.with_suffix('.zip'), 'w', zipfile.ZIP_DEFLATED) as zf:
+			for item in path.rglob('*'):
+				zf.write(item, item.relative_to(path))
+
+
+def uncompress(path, overwrite=False):
+	''' Uncompress a .zip archive '''
+	if overwrite or not path.exists():
+		if path.with_suffix('.zip').exists():
+			with zipfile.ZipFile(path.with_suffix('.zip'), 'r') as zf:
+				zf.extractall(path)
 
 
 class CustomUnpickler(pkl.Unpickler):
@@ -207,14 +229,14 @@ def mask_land(data, bands, threshold=0.2, verbose=False):
 
 
 @ignore_warnings
-def _get_tile_wavelengths(nc_data, key, sensor, allow_neg=True, landmask=False):
+def _get_tile_wavelengths(nc_data, key, sensor, allow_neg=True, landmask=False, args=None):
 	''' Return the Rrs/rhos data within the netcdf file, for wavelengths of the given sensor '''
 	has_key = lambda k: any([k in v for v in nc_data.variables])
 	wvl_key = f'{key}_' if has_key(f'{key}_') or key != 'Rrs' else 'Rw' # Polymer stores Rw=Rrs*pi
 
 	if has_key(wvl_key):
 		avail = get_wvl(nc_data, wvl_key)
-		bands = [closest_wavelength(b, avail) for b in get_sensor_bands(sensor)]
+		bands = [closest_wavelength(b, avail) for b in get_sensor_bands(sensor, args)]
 		div   = np.pi if wvl_key == 'Rw' else 1
 		data  = np.ma.stack([nc_data[f'{wvl_key}{b}'][:] / div for b in bands], axis=-1)
 		
@@ -224,7 +246,7 @@ def _get_tile_wavelengths(nc_data, key, sensor, allow_neg=True, landmask=False):
 		return bands, data.filled(fill_value=np.nan)
 	return [], np.array([])
 
-def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
+def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False, **kwargs):
 	''' Gather the correct Rrs/rhos bands from a given scene, as well as ancillary features if necessary '''
 	from netCDF4 import Dataset
 
@@ -236,6 +258,7 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 	# Some sensors use different bands for their rhos models 
 	if rhos and '-rho' not in sensor: sensor += '-rho'
 
+	args = get_args(sensor=sensor, **kwargs)
 	for filename in filenames:
 		with Dataset(filename, 'r') as nc_data:
 			if 'geophysical_data' in nc_data.groups.keys():
@@ -244,7 +267,7 @@ def get_tile_data(filenames, sensor, allow_neg=True, rhos=False, anc=False):
 			for feature in features:
 				if feature not in data:
 					if feature in ['Rrs', 'rhos']:
-						bands, band_data = _get_tile_wavelengths(nc_data, feature, sensor, allow_neg, landmask=rhos)
+						bands, band_data = _get_tile_wavelengths(nc_data, feature, sensor, allow_neg, landmask=rhos, args=args)
 	
 						if len(bands) > 0: 
 							assert(len(band_data.shape) == 3), \
@@ -322,7 +345,8 @@ def generate_config(args, create=True, verbose=True):
 	uid    = hashlib.sha256(h_str.encode('utf-8')).hexdigest()
 	folder = root.joinpath(uid)
 	c_file = folder.joinpath('config')
-
+	uncompress(folder) # Unzip the archive if necessary
+	
 	if args.verbose: 
 		print(f'Using model path {folder}')
 
@@ -363,9 +387,12 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 		''' Error handling wrapper over np.loadtxt, with the addition of wavelength selection'''
 		dloc = Path(loc).joinpath(f'{name}.csv')
 		
-		# TSS / TSM are synonymous
+		# TSS / TSM / SPM are synonymous
 		if 'tss' in name and not dloc.exists():
 			dloc = Path(loc).joinpath(f'{name.replace("tss","tsm")}.csv')
+
+			if not dloc.exists():
+				dloc = Path(loc).joinpath(f'{name.replace("tsm","spm")}.csv')
 
 		# CDOM is just an alias for a_cdom(443) or a_g(443)
 		if 'cdom' in name and not dloc.exists():
@@ -376,7 +403,7 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 			required_wvl = np.array(required_wvl).flatten()
 			assert(dloc.exists()), (f'Key {name} does not exist at {loc} ({dloc})') 
 
-			data = np.loadtxt(dloc, delimiter=',', dtype=float if name not in ['../Dataset', '../meta'] else str, comments=None)
+			data = np.loadtxt(dloc, delimiter=',', dtype=float if name not in ['../Dataset', '../meta', '../datetime'] else str, comments=None)
 			if len(data.shape) == 1: data = data[:, None]
 
 			if data.shape[1] > 1 and data.dtype.type is not np.str_:
@@ -419,7 +446,7 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 		# First, validate available wavelengths are within the margin of the required wavelengths
 		valid = np.array([True] * len(required_wvl))
 		if len(wvls) != len(required_wvl):
-			valid = np.abs(wvls - np.atleast_2d(required_wvl)).min(1) < margin
+			valid = np.abs(wvls - np.atleast_2d(required_wvl)).min(1) <= margin
 			assert(valid.sum() == len(required_wvl)), [wvls[valid].flatten(), required_wvl]
 
 		# Then, ensure the order of the available wavelengths are the same as the required
@@ -440,7 +467,7 @@ def _load_datasets(keys, locs, wavelengths, allow_missing=False):
 	for loc in locs:
 		try:
 			loc_data = [loadtxt(key, loc, wavelengths) for key in keys]
-			print(f'\tN={len(loc_data[0]):>5} | {loc.parts[-1]} / {loc.parts[-2]} ({[np.isfinite(ld).all(1).sum() for ld in loc_data[1:]]})')
+			print(f'\tN={len(loc_data[0]):>5} | {loc.parts[-1]} / {loc.parts[-2]} ({[np.isfinite(ld).all(1).sum() if ld.dtype.type is not np.str_ else len(ld) for ld in loc_data[1:]]})')
 			assert(all([len(l) in [len(loc_data[0]), 0] for l in loc_data])), dict(zip(keys, map(np.shape, loc_data)))
 
 			if all([l.shape[1] == 0 for l in loc_data[(1 if len(loc_data) > 1 else 0):]]):

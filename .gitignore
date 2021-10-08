@@ -15,3 +15,6 @@ toy*
 
 # pdf files
 *.pdf
+
+# Uncompressed model files
+Weights/*/*/

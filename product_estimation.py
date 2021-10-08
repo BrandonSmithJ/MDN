@@ -9,7 +9,7 @@ import hashlib
 
 from .model import MDN
 from .meta  import get_sensor_bands, SENSOR_LABEL, ANCILLARY, PERIODIC
-from .utils import get_labels, get_data, generate_config, using_feature, split_data, _load_datasets
+from .utils import get_labels, get_data, generate_config, using_feature, split_data, _load_datasets, compress
 from .metrics import performance, mdsa, sspb, msa
 from .plot_utils import plot_scatter
 from .benchmarks import run_benchmarks
@@ -50,6 +50,7 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 		'threshold'           : getattr(args, 'threshold', None),
 		'confidence_interval' : getattr(args, 'CI', None),
 		'use_gpu'             : getattr(args, 'use_gpu', False),
+		'chunk_size'          : getattr(args, 'chunk_size', 1e5),
 		'return_coefs'        : True,
 	}
 
@@ -123,6 +124,9 @@ def get_estimates(args, x_train=None, y_train=None, x_test=None, y_test=None, ou
 
 		if hasattr(model, 'session'): model.session.close()
 
+	# Create compressed model archive
+	compress(model_path)
+
 	if len(outputs) == 1:
 		outputs = list(outputs.values())[0]
 	return outputs, model.output_slices
@@ -157,8 +161,9 @@ def image_estimates(data, sensor=None, function=apply_model, rhos=False, anc=Fal
 		f'Requested sensor {sensor} unknown. Must be one of: {list(SENSOR_LABEL.keys())}')
 	assert(len(data.shape) == 3), (
 		f'Expected data to have 3 dimensions (height, width, feature). Found shape: {data.shape}')
-	
-	expected_features = len(get_sensor_bands(sensor)) + (len(ANCILLARY)+len(PERIODIC) if anc or rhos else 0)
+
+	args = get_args(sensor=sensor, **kwargs)
+	expected_features = len(get_sensor_bands(sensor, args)) + (len(ANCILLARY)+len(PERIODIC) if anc or rhos else 0)
 	assert(data.shape[-1] == expected_features), (
 		f'Got {data.shape[-1]} features; expected {expected_features} features for sensor {sensor}')
 	
@@ -187,20 +192,31 @@ def image_estimates(data, sensor=None, function=apply_model, rhos=False, anc=Fal
 	return est_data
 
 
-
 def print_dataset_stats(**kwargs):
 	''' Print datasets shape & min / max stats per feature '''
 	label = kwargs.pop('label', '')
 	for k, arr in kwargs.items():
 		if arr is not None:
-			arr = np.array(arr)
-			print(f'\n{label} {k.title()}'.strip()+'\n\t'.join(['']+[f'{k}: {v}' for k, v in {
-				'Shape'   : arr.shape,
-				'N Valid' : getattr(np.isfinite(arr).sum(0), 'min' if arr.shape[1] > 10 else 'tolist')(),
-				'Minimum' : list(np.nanmin(arr, 0).round(2)),
-				'Maximum' : list(np.nanmax(arr, 0).round(2))
-				# 'Min,Max' : list(zip(np.nanmin(arr, 0).round(2), np.nanmax(arr, 0).round(2))),
-			}.items()]))
+			print(f'\n{label} {k.title()}'.strip()+'\n\t'.join(['']+[f'{k}: {v}'.replace("'", "") for k, v in {
+				'Shape'   : np.array(arr).shape,
+				'N Valid' : getattr(np.isfinite(arr).sum(0), 'min' if np.array(arr).shape[1] > 10 else 'tolist')(),
+				'Minimum' : [f'{a:>6.2f}' for a in np.nanmin(arr, 0)],
+				'Maximum' : [f'{a:>6.2f}' for a in np.nanmax(arr, 0)],
+			}.items()]), '\n')
+
+			if hasattr(arr, 'head'):
+				print('First sample:')
+				print(arr.head(1).to_string(index=False), '\n---------------------------\n')
+
+
+def generate_estimates(args, bands, x_train, y_train, x_test, y_test, slices, locs=None):
+    estimates, slices = get_estimates(args, x_train, y_train, x_test, y_test, slices)
+    estimates = np.median(estimates, 0)
+    benchmarks = run_benchmarks(args.sensor, x_test, y_test, x_train, y_train, slices, args)
+    for p in slices: 
+        if p not in benchmarks: benchmarks[p] = {}
+        benchmarks[p].update({'MDN' : estimates[..., slices[p]]})
+    return benchmarks
 
 
 def main():

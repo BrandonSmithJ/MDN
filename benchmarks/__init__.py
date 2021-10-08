@@ -57,7 +57,7 @@ def run_benchmarks(sensor, x_test, y_test=None, x_train=None, y_train=None, slic
 		assert(a is None or b is None or a.shape[1] == b.shape[1]), \
 			f'Differing number of {label} features: {a.shape[1]} vs {b.shape[1]}'
 
-	slices = slices or {product: slice(None)}
+	slices = slices or {p: slice(None) for p in np.atleast_1d(product)}
 	bands  = np.array(get_sensor_bands(sensor, args) if bands is None else bands)
 	bench  = dd(dict)
 
