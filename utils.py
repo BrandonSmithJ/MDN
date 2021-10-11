@@ -340,8 +340,8 @@ def generate_config(args, create=True, verbose=True):
 
 	config = '\n'.join(config) # Model is dependent on some arguments, so they change the uid
 	others = '\n'.join(others) # Other arguments are stored for replicability
-	ver_re = r'(Version\: \d+\.\d+)(?:\.\d+\n[-]+\n)' # Match major/minor version within subgroup, patch/dashes within pattern
-	h_str  = re.sub(ver_re, r'\1.0\n', config)        # Substitute patch version for ".0" to allow patches within the same uid
+	ver_re = r'(Version\: \d+\.\d+)(?:\.\d+\n)' # Match major/minor version within subgroup, patch/dashes within pattern
+	h_str  = re.sub(ver_re, r'\1.0\n', config)  # Substitute patch version for ".0" to allow patches within the same uid
 	uid    = hashlib.sha256(h_str.encode('utf-8')).hexdigest()
 	folder = root.joinpath(uid)
 	c_file = folder.joinpath('config')
