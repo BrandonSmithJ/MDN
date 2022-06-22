@@ -345,7 +345,8 @@ def generate_config(args, create=True, verbose=True):
 	uid    = hashlib.sha256(h_str.encode('utf-8')).hexdigest()
 	folder = root.joinpath(uid)
 	c_file = folder.joinpath('config')
-	uncompress(folder) # Unzip the archive if necessary
+	try: uncompress(folder) # Unzip the archive if necessary
+	except: raise Exception('Weights have not yet been downloaded - please run "git lfs install" and then "git lfs pull" inside the repository folder')
 	
 	if args.verbose: 
 		print(f'Using model path {folder}')
