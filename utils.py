@@ -105,7 +105,7 @@ def uncompress(path, overwrite=False):
 	if overwrite or not path.exists():
 		if path.with_suffix('.zip').exists():
 			with zipfile.ZipFile(path.with_suffix('.zip'), 'r') as zf:
-				zf.extractall(path)
+				zf.extractall(path.parent)
 
 
 class CustomUnpickler(pkl.Unpickler):
